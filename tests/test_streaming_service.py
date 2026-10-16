@@ -8,7 +8,7 @@ from modules.processing.exceptions import ProcessingException
 from modules.processing.facade import FrameInput
 from modules.processing.schemas import FrameMeasurements, QueuedFrame
 from modules.sessions.exceptions import SessionAccessException
-from modules.streaming.schemas import StreamError
+from modules.streaming.exceptions import StreamException
 from tests.helpers import (
     FakeFramePredictor,
     MutableClock,
@@ -32,7 +32,7 @@ def test_frame_admission_and_upload_metrics(
         invalid = FrameInput(
             frame_id=frame_id, captured_at_ms=captured_at_ms, jpeg=b"jpeg"
         )
-        with pytest.raises(StreamError, match="invalid_frame"):
+        with pytest.raises(StreamException, match="invalid_frame"):
             await runtime.streaming_service.submit_frame(
                 publisher.connection_id, invalid
             )
@@ -71,7 +71,7 @@ def test_failed_admission_does_not_increment_upload_counters(
             AsyncMock(side_effect=ProcessingException("server_unavailable")),
         )
         frame = FrameInput(frame_id=1, captured_at_ms=1.0, jpeg=b"jpeg")
-        with pytest.raises(StreamError, match="server_unavailable"):
+        with pytest.raises(StreamException, match="server_unavailable"):
             await runtime.streaming_service.submit_frame(publisher.connection_id, frame)
         status = await runtime.streaming_service.get_status(publisher.connection_id)
         assert status.diagnostics.received_frames == 0
@@ -103,7 +103,7 @@ def test_initialization_failure_removes_partial_state_and_releases_seat(
             runtime.frame_processing_service, "open_connection", fail_open
         )
         expected = (
-            StreamError if isinstance(failure, ProcessingException) else RuntimeError
+            StreamException if isinstance(failure, ProcessingException) else RuntimeError
         )
         with pytest.raises(expected):
             await runtime.streaming_service.open_stream(

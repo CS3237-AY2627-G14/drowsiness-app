@@ -1,7 +1,7 @@
 import pytest
 
 from modules.processing.facade import FrameInput
-from modules.streaming.schemas import StreamError
+from modules.streaming.exceptions import StreamException
 from modules.streaming.utils.parse_frame import FRAME_HEADER, parse_frame
 
 
@@ -20,7 +20,7 @@ from modules.streaming.utils.parse_frame import FRAME_HEADER, parse_frame
     ],
 )
 def test_invalid_binary_frames(payload: object) -> None:
-    with pytest.raises(StreamError):
+    with pytest.raises(StreamException):
         parse_frame(payload, 10)
 
 

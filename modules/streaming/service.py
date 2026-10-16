@@ -11,10 +11,10 @@ from modules.sessions.facade import (
 from modules.streaming.repositories.registry import StreamingRegistry
 from modules.streaming.schemas import (
     StreamDiagnostics,
-    StreamError,
     StreamingRecord,
     StreamStatus,
 )
+from modules.streaming.exceptions import StreamException
 from modules.streaming.utils.wait_for_cleanup import wait_for_cleanup
 
 
@@ -40,7 +40,7 @@ class StreamingService:
                 token=token, seat_id=seat_id
             )
         except SessionAccessException as error:
-            raise StreamError(error.code) from error
+            raise StreamException(error.code) from error
         try:
             await self._processing_facade.open_connection(publisher.connection_id)
             opened_at = self._timer.now()
@@ -55,21 +55,21 @@ class StreamingService:
             )
             await wait_for_cleanup(cleanup)
             if isinstance(error, ProcessingException):
-                raise StreamError(error.code) from error
+                raise StreamException(error.code) from error
             raise
         return publisher
 
     def _get_record(self, connection_id: UUID) -> StreamingRecord:
         record = self._streaming_registry.get(connection_id)
         if record is None:
-            raise StreamError("stream_closed")
+            raise StreamException("stream_closed")
         return record
 
     async def _validate_publisher(self, connection_id: UUID) -> None:
         try:
             await self._sessions_facade.validate_publisher(connection_id)
         except SessionAccessException as error:
-            raise StreamError(error.code) from error
+            raise StreamException(error.code) from error
 
     async def submit_frame(self, connection_id: UUID, frame: FrameInput) -> None:
         record = self._get_record(connection_id)
@@ -78,12 +78,12 @@ class StreamingService:
             frame.frame_id <= record.last_frame_id
             or frame.captured_at_ms <= record.last_capture_ms
         ):
-            raise StreamError("invalid_frame")
+            raise StreamException("invalid_frame")
         received_at = self._timer.now()
         try:
             await self._processing_facade.submit_frame(connection_id, frame)
         except ProcessingException as error:
-            raise StreamError(error.code) from error
+            raise StreamException(error.code) from error
         updated_record = record.model_copy(
             update={
                 "last_frame_id": frame.frame_id,
@@ -99,18 +99,18 @@ class StreamingService:
         record = self._get_record(connection_id)
         await self._validate_publisher(connection_id)
         if self._timer.now() - record.last_received_at >= 10:
-            raise StreamError("stream_idle")
+            raise StreamException("stream_idle")
         try:
             await self._processing_facade.get_status(connection_id)
         except ProcessingException as error:
-            raise StreamError(error.code) from error
+            raise StreamException(error.code) from error
 
     async def get_status(self, connection_id: UUID) -> StreamStatus:
         record = self._get_record(connection_id)
         try:
             processing_status = await self._processing_facade.get_status(connection_id)
         except ProcessingException as error:
-            raise StreamError(error.code) from error
+            raise StreamException(error.code) from error
         now = self._timer.now()
         elapsed = max(now - record.sample_at, 0.001)
         diagnostics = StreamDiagnostics(

@@ -8,7 +8,8 @@ from pydantic import ValidationError
 
 from core.config import Settings
 from modules.streaming.facade import StreamingFacade
-from modules.streaming.schemas import AuthenticateMessage, SocketConnection, StreamError
+from modules.streaming.schemas import AuthenticateMessage, SocketConnection
+from modules.streaming.exceptions import StreamException
 from modules.streaming.utils.build_stream_response import build_stream_response
 from modules.streaming.utils.parse_frame import parse_frame
 from modules.streaming.utils.wait_for_cleanup import wait_for_cleanup
@@ -53,7 +54,7 @@ class StreamingSocketRouter:
             publisher = await self._streaming_facade.open_stream(
                 token=token, seat_id=credentials.seat_id
             )
-        except StreamError as error:
+        except StreamException as error:
             raise socketio.exceptions.ConnectionRefusedError(
                 "Publishing denied", {"code": error.code}
             ) from None
@@ -77,7 +78,7 @@ class StreamingSocketRouter:
         try:
             frame = parse_frame(payload, self._settings.max_frame_bytes)
             await self._streaming_facade.submit_frame(connection.connection_id, frame)
-        except StreamError as error:
+        except StreamException as error:
             await self._disconnect_with_error(sid, error.code)
 
     async def unexpected_event(self, event: str, sid: str, *args: object) -> None:
@@ -161,7 +162,7 @@ class StreamingSocketRouter:
                 if connection is None:
                     return
                 await self._streaming_facade.check_stream(connection.connection_id)
-        except StreamError as error:
+        except StreamException as error:
             await self._disconnect_with_error(sid, error.code)
         except Exception:
             logger.exception("Stream monitoring task failed")
@@ -183,7 +184,7 @@ class StreamingSocketRouter:
                 )
                 payload = response.model_dump(mode="json", exclude=excluded_fields)
                 await self._emit_with_timeout(sid, "status", payload)
-        except StreamError as error:
+        except StreamException as error:
             await self._disconnect_with_error(sid, error.code)
         except TimeoutError:
             await self._disconnect_with_error(sid, "connection_timeout")
