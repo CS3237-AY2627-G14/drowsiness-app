@@ -103,7 +103,9 @@ def test_initialization_failure_removes_partial_state_and_releases_seat(
             runtime.frame_processing_service, "open_connection", fail_open
         )
         expected = (
-            StreamException if isinstance(failure, ProcessingException) else RuntimeError
+            StreamException
+            if isinstance(failure, ProcessingException)
+            else RuntimeError
         )
         with pytest.raises(expected):
             await runtime.streaming_service.open_stream(

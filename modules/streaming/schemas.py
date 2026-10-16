@@ -69,5 +69,3 @@ class SocketConnection(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     connection_id: UUID
     diagnostics: bool
-
-
