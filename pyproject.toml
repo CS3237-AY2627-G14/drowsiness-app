@@ -1,0 +1,47 @@
+[project]
+name = "drowsiness-api"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.143.0",
+    "uvicorn[standard]>=0.37,<1",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.11,<3",
+    "sqlalchemy>=2.0.44,<3",
+    "mediapipe==0.10.21",
+    "opencv-contrib-python>=4.9,<4.12",
+    "torch>=2.6,<3",
+    "pillow>=11,<13",
+    "python-socketio>=5.16,<6",
+    "timm>=1.0.20,<2",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=2,<3",
+    "mypy>=1.18,<2",
+    "pytest>=8.4,<10",
+    "ruff>=0.13,<1",
+]
+
+[tool.ruff]
+target-version = "py312"
+extend-exclude = ["webui"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
+python_version = "3.12"
+strict = true
+files = ["main.py", "core", "modules", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = ["inference: real model and MediaPipe integration tests"]
+
+[[tool.mypy.overrides]]
+module = ["mediapipe.*", "torchvision.*", "socketio.*"]
+ignore_missing_imports = true
