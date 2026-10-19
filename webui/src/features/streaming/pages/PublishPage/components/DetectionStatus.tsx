@@ -50,13 +50,29 @@ export const DetectionStatus = ({ detection }: DetectionStatusProps) => {
           <dt>CNN fatigue probability</dt>
           <dd>{fatigueProbability}</dd>
         </div>
+        <div>
+          <dt>FSR reading (raw)</dt>
+          <dd>{detection?.fsr_raw ?? '—'}</dd>
+        </div>
+        <div>
+          <dt>ToF distance</dt>
+          <dd>
+            {detection?.tof_distance_mm == null
+              ? '—'
+              : `${detection.tof_distance_mm} mm`}
+          </dd>
+        </div>
       </dl>
       <p className="mt-4 text-xs text-[var(--sea-ink-soft)]">
         One picture per second counts toward the minute. An alert needs at least
         30 valid pictures, with half or more showing signs of drowsiness.
-        Missing pictures do not count as awake.
+        Missing pictures do not count as awake. A fresh FSR reading of zero
+        marks the seat unoccupied; ToF is shown for monitoring and does not yet
+        affect the drowsiness classification.
       </p>
-      {detection && !detection.face_detected ? (
+      {detection?.fsr_raw === 0 ? (
+        <p className="mt-2 text-sm">Seat unoccupied.</p>
+      ) : detection && !detection.face_detected ? (
         <p className="mt-2 text-sm">No face detected in the latest picture.</p>
       ) : null}
     </section>

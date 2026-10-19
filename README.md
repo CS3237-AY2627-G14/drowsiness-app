@@ -61,10 +61,42 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access. State is
-in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-Application MQTT integration is not implemented yet; camera uploads use
-Socket.IO at `/api/socket.io` through Vite's API proxy.
+Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access.
+State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
+The API subscribes to `drowsy/+/data`; `drowsy/student<N>/data` maps to seat N.
+Each message must be UTF-8 JSON with `fsr` (raw ADC value, 0–4095),
+`tof_mm` (positive distance in millimeters), and `timestamp_ms` (Unix epoch
+milliseconds), for example:
+
+```json
+{"fsr": 1234, "tof_mm": 420, "timestamp_ms": 1792390000000}
+```
+
+The latest sensor reading is attached to that seat's camera detection when it
+is no more than five seconds old. An FSR value of zero marks the seat
+unoccupied, so that camera sample is not counted as awake or drowsy. ToF is
+included in the live status for monitoring but does not affect classification
+until a calibrated drowsiness threshold is defined. Set
+`DROWSINESS_MQTT_ENABLED=false` to disable the subscriber, or override
+`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT` to use another broker.
+The subscriber retries if the broker is unavailable. Camera uploads continue
+to use Socket.IO at `/api/socket.io` through Vite's API proxy.
+
+To send a test reading to the local broker while the API and frontend are
+running, start a camera stream for seat 1 and run this from the repository root:
+
+```bash
+uv run python scripts/publish_mqtt_test_data.py
+```
+
+The script publishes ten fresh readings (one per second) with `fsr=1234` and
+`tof_mm=420` to `drowsy/student1/data`. Check that the values appear in the live
+detection status. Change the node, values, count, or interval with its options.
+To test an unoccupied seat or another node:
+
+```bash
+uv run python scripts/publish_mqtt_test_data.py --student 2 --fsr 0 --tof-mm 420
+```
 
 ## Checks
 

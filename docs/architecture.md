@@ -10,7 +10,7 @@ wires the application together.
 | classrooms | Rooms and seats | None |
 | sessions | Authorization sessions and exclusive publisher ownership | Classrooms facade |
 | streaming | Live connections, frame admission, lifecycle and reporting | Sessions and processing facades |
-| processing | Frame buffering, inference scheduling and detection history | None |
+| processing | Frame and sensor processing, inference scheduling and detection history | None |
 | devices | Device login and seat assignment | Classrooms and sessions facades |
 
 Dependencies must stay acyclic.
@@ -30,8 +30,9 @@ record), and a connection (one publishing connection).
 - **Sessions** decides who may publish and guarantees one publisher per seat.
 - **Streaming** owns live connections and is the only module that coordinates
   sessions and processing.
-- **Processing** analyzes frames and holds detection results. It knows only
-  connections and frames, never authorization, sessions or classrooms.
+- **Processing** analyzes frames and seat sensor readings and holds detection
+  results. It knows only connections, seat IDs and measurements, never
+  authorization, sessions or classrooms.
 
 ## Design decisions
 
@@ -58,6 +59,8 @@ record), and a connection (one publishing connection).
    processing state is opened. Any failure rolls back all of it.
 2. **Stream.** Frames are admitted and passed to processing, and detection status
    is reported to the client.
+   MQTT readings on `drowsy/student<N>/data` are mapped to seat N and attached
+   to that seat's camera results while the reading is fresh.
 3. **Monitor.** Each connection is checked for session expiry, processing health
    and idleness. Status reporting can be removed without affecting monitoring.
 4. **Disconnect.** Seat ownership is released, connection state is discarded, and

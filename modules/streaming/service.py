@@ -8,13 +8,13 @@ from modules.sessions.facade import (
     SessionAccessException,
     SessionsFacade,
 )
+from modules.streaming.exceptions import StreamException
 from modules.streaming.repositories.registry import StreamingRegistry
 from modules.streaming.schemas import (
     StreamDiagnostics,
     StreamingRecord,
     StreamStatus,
 )
-from modules.streaming.exceptions import StreamException
 from modules.streaming.utils.wait_for_cleanup import wait_for_cleanup
 
 
@@ -43,6 +43,9 @@ class StreamingService:
             raise StreamException(error.code) from error
         try:
             await self._processing_facade.open_connection(publisher.connection_id)
+            await self._processing_facade.associate_seat(
+                publisher.connection_id, publisher.seat_id
+            )
             opened_at = self._timer.now()
             record = StreamingRecord(
                 publisher=publisher, last_received_at=opened_at, sample_at=opened_at

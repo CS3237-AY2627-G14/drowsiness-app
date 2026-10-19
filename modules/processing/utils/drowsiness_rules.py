@@ -17,6 +17,8 @@ def calculate_mean_ear(measurements: FrameMeasurements) -> float | None:
 
 
 def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool | None:
+    if measurements.fsr_raw == 0:
+        return None
     left_ear = measurements.left_ear
     right_ear = measurements.right_ear
     probability = measurements.fatigue_probability
@@ -81,6 +83,8 @@ def evaluate_measurements(
         captured_at_ms=measurements.captured_at_ms,
         ear=mean_ear,
         fatigue_probability=measurements.fatigue_probability,
+        fsr_raw=measurements.fsr_raw,
+        tof_distance_mm=measurements.tof_distance_mm,
         minute=minute,
         processing_ms=measurements.processing_ms,
         alert=alert,

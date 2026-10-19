@@ -6,6 +6,7 @@ from modules.processing.schemas import (
     FrameInput,
     MinuteSummary,
     ProcessingStatus,
+    SensorMeasurements,
 )
 from modules.processing.services.frame_processing_service import FrameProcessingService
 
@@ -16,6 +17,7 @@ __all__ = [
     "ProcessingException",
     "ProcessingFacade",
     "ProcessingStatus",
+    "SensorMeasurements",
 ]
 
 
@@ -25,6 +27,16 @@ class ProcessingFacade:
 
     async def open_connection(self, connection_id: UUID) -> None:
         await self._frame_processing_service.open_connection(connection_id)
+
+    async def associate_seat(self, connection_id: UUID, seat_id: int) -> None:
+        await self._frame_processing_service.associate_seat(connection_id, seat_id)
+
+    async def submit_sensor_measurements(
+        self, seat_id: int, measurements: SensorMeasurements
+    ) -> None:
+        await self._frame_processing_service.submit_sensor_measurements(
+            seat_id, measurements
+        )
 
     async def submit_frame(self, connection_id: UUID, frame: FrameInput) -> None:
         await self._frame_processing_service.submit_frame(connection_id, frame)

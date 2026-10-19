@@ -14,6 +14,7 @@ from modules.processing.schemas import (
     ProcessingRecord,
     ProcessingStatus,
     QueuedFrame,
+    SensorMeasurements,
 )
 from modules.processing.utils.drowsiness_rules import evaluate_measurements
 
@@ -39,6 +40,9 @@ class FrameProcessingService:
         self._available = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
         self._failed = False
+        self._sensor_measurements_by_seat: dict[
+            int, tuple[SensorMeasurements, float]
+        ] = {}
 
     def start(self, workers: int) -> None:
         self._tasks = [
@@ -65,6 +69,26 @@ class FrameProcessingService:
         if self._failed:
             raise ProcessingException("server_unavailable")
         self._processing_registry.save(connection_id, ProcessingRecord())
+
+    async def associate_seat(self, connection_id: UUID, seat_id: int) -> None:
+        record = self._get_active_record(connection_id)
+        self._processing_registry.save(
+            connection_id, record.model_copy(update={"seat_id": seat_id})
+        )
+
+    async def submit_sensor_measurements(
+        self, seat_id: int, measurements: SensorMeasurements
+    ) -> None:
+        latest = self._sensor_measurements_by_seat.get(seat_id)
+        if (
+            latest is not None
+            and measurements.captured_at_ms <= latest[0].captured_at_ms
+        ):
+            return
+        self._sensor_measurements_by_seat[seat_id] = (
+            measurements,
+            self._timer.now(),
+        )
 
     def _get_active_record(self, connection_id: UUID) -> ProcessingRecord:
         if self._failed:
@@ -128,6 +152,23 @@ class FrameProcessingService:
         if measurements.error:
             updated_record = record.model_copy(update={"error": measurements.error})
         else:
+            sensor_entry = (
+                self._sensor_measurements_by_seat.get(record.seat_id)
+                if record.seat_id is not None
+                else None
+            )
+            if (
+                sensor_entry is not None
+                and self._timer.now() - sensor_entry[1]
+                <= self._settings.mqtt_sensor_max_age_seconds
+            ):
+                sensor_measurements = sensor_entry[0]
+                measurements = measurements.model_copy(
+                    update={
+                        "fsr_raw": sensor_measurements.fsr_raw,
+                        "tof_distance_mm": sensor_measurements.tof_distance_mm,
+                    }
+                )
             detection_state = evaluate_measurements(
                 record.detection_state, measurements, self._settings
             )

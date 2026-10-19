@@ -13,6 +13,8 @@ def build_stream_response(status: StreamStatus, diagnostics: bool) -> StreamResp
             captured_at_ms=result.captured_at_ms,
             ear=result.ear,
             fatigue_probability=result.fatigue_probability,
+            fsr_raw=result.fsr_raw,
+            tof_distance_mm=result.tof_distance_mm,
             minute=result.minute,
             alert=result.alert,
             face_detected=result.face_detected,
