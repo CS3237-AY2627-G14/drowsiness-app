@@ -8,13 +8,13 @@ from modules.sessions.facade import (
     SessionAccessException,
     SessionsFacade,
 )
+from modules.streaming.exceptions import StreamException
 from modules.streaming.repositories.registry import StreamingRegistry
 from modules.streaming.schemas import (
     StreamDiagnostics,
     StreamingRecord,
     StreamStatus,
 )
-from modules.streaming.exceptions import StreamException
 from modules.streaming.utils.wait_for_cleanup import wait_for_cleanup
 
 

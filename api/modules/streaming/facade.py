@@ -3,7 +3,6 @@ from uuid import UUID
 from modules.processing.facade import FrameInput
 from modules.sessions.facade import PublisherSession
 from modules.streaming.schemas import StreamStatus
-from modules.streaming.exceptions import StreamException
 from modules.streaming.service import StreamingService
 
 __all__ = [

@@ -7,9 +7,9 @@ from anyio import CancelScope
 from pydantic import ValidationError
 
 from core.config import Settings
+from modules.streaming.exceptions import StreamException
 from modules.streaming.facade import StreamingFacade
 from modules.streaming.schemas import AuthenticateMessage, SocketConnection
-from modules.streaming.exceptions import StreamException
 from modules.streaming.utils.build_stream_response import build_stream_response
 from modules.streaming.utils.parse_frame import parse_frame
 from modules.streaming.utils.wait_for_cleanup import wait_for_cleanup
