@@ -1,6 +1,6 @@
 # Architecture
 
-A modular monolith: a FastAPI API and a React frontend in `webui/`. `main.py`
+A modular monolith: a FastAPI API and a React frontend in `../../webui`. [main.py](../main.py)
 wires the application together.
 
 ## Modules
@@ -20,7 +20,7 @@ Dependencies must stay acyclic.
 Requests flow router → facade → service → repository. Routers handle transport,
 facades delegate, services enforce rules, and repositories hold internal state. A
 module's facade is its public contract: other modules see only its immutable DTOs
-and errors, so internals can change freely. The import rules are in `AGENTS.md`.
+and errors, so internals can change freely. The import rules are in [AGENTS.md](../AGENTS.md).
 
 ## Ownership
 

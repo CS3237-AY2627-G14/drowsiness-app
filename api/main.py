@@ -158,3 +158,6 @@ def create_app(
         return {"status": "ok"}
 
     return application
+
+
+app = create_app()

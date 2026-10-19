@@ -1,3 +1,4 @@
+# Repository-wide local files and generated artifacts.
 .venv/
 __pycache__/
 *.py[cod]
@@ -9,8 +10,13 @@ __pycache__/
 .vscode/
 .cursorrules
 .DS_Store
-models/*.pth
-!models/drowsiness_mobilenetv4_20261016_013212.pth
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
 .env
 .env.*
 !.env.example
+!.env.*.example
+*.pem
+*.key
