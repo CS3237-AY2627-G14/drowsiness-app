@@ -1,0 +1,16 @@
+../.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.local/
+.idea/
+.vscode/
+.cursorrules
+.DS_Store
+models/*.pth
+!models/drowsiness_mobilenetv4_20261016_013212.pth
+.env
+.env.example
+!.env.example
