@@ -19,7 +19,7 @@ class QueuedFrame(BaseModel):
 
 
 class FrameMeasurements(BaseModel):
-    """Raw EAR and CNN measurements returned for one camera frame."""
+    """Measurements used to classify one camera frame."""
 
     model_config = ConfigDict(frozen=True, strict=True)
     connection_id: UUID
@@ -28,8 +28,17 @@ class FrameMeasurements(BaseModel):
     left_ear: float | None = None
     right_ear: float | None = None
     fatigue_probability: float | None = None
+    fsr_raw: int | None = None
+    tof_distance_mm: int | None = None
     processing_ms: float = 0.0
     error: str | None = None
+
+
+class SensorMeasurements(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True)
+    fsr_raw: int
+    tof_distance_mm: int
+    captured_at_ms: float
 
 
 class DetectionSample(BaseModel):
@@ -57,6 +66,8 @@ class DrowsinessResult(BaseModel):
     captured_at_ms: float
     ear: float | None
     fatigue_probability: float | None
+    fsr_raw: int | None
+    tof_distance_mm: int | None
     minute: MinuteSummary
     processing_ms: float
     alert: bool
@@ -75,6 +86,7 @@ class DetectionState(BaseModel):
 
 class ProcessingRecord(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
+    seat_id: int | None = None
     processed_frames: int = 0
     replaced_frames: int = 0
     stale_frames: int = 0

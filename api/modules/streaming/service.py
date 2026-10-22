@@ -43,6 +43,9 @@ class StreamingService:
             raise StreamException(error.code) from error
         try:
             await self._processing_facade.open_connection(publisher.connection_id)
+            await self._processing_facade.associate_seat(
+                publisher.connection_id, publisher.seat_id
+            )
             opened_at = self._timer.now()
             record = StreamingRecord(
                 publisher=publisher, last_received_at=opened_at, sample_at=opened_at

@@ -53,6 +53,8 @@ class DetectionSnapshot(BaseModel):
     captured_at_ms: float
     ear: float | None
     fatigue_probability: float | None
+    fsr_raw: int | None
+    tof_distance_mm: int | None
     minute: MinuteSummary
     alert: bool
     face_detected: bool

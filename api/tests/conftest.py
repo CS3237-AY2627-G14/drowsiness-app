@@ -15,7 +15,7 @@ def clock() -> MutableClock:
 
 @pytest.fixture
 def client(clock: MutableClock) -> Iterator[TestClient]:
-    settings = Settings(demo_seat_count=10)
+    settings = Settings(demo_seat_count=10, mqtt_enabled=False)
     application = create_app(
         settings,
         clock=clock,

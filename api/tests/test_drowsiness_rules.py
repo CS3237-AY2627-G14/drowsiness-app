@@ -137,3 +137,46 @@ def test_frame_classification_preserves_signal_boundaries(
     assert detection.minute.valid_samples == valid_samples
     assert detection.minute.drowsy_samples == drowsy_samples
     assert not detection.alert
+
+
+def test_unoccupied_sensor_sample_is_unknown_and_exposes_sensor_readings() -> None:
+    measurement = FrameMeasurements(
+        connection_id=uuid4(),
+        frame_id=1,
+        captured_at_ms=1000.0,
+        left_ear=0.1,
+        right_ear=0.1,
+        fatigue_probability=0.9,
+        fsr_raw=0,
+        tof_distance_mm=420,
+    )
+
+    result = evaluate_measurements(DetectionState(), measurement, Settings())
+
+    assert result.detection is not None
+    assert result.detection.minute.valid_samples == 0
+    assert result.detection.minute.drowsy_samples == 0
+    assert result.detection.fsr_raw == 0
+    assert result.detection.tof_distance_mm == 420
+
+
+@pytest.mark.parametrize("tof_distance_mm", [1, 420, 4000])
+def test_tof_distance_does_not_change_camera_classification(
+    tof_distance_mm: int,
+) -> None:
+    measurement = FrameMeasurements(
+        connection_id=uuid4(),
+        frame_id=1,
+        captured_at_ms=1000.0,
+        left_ear=0.3,
+        right_ear=0.3,
+        fatigue_probability=0.1,
+        fsr_raw=1234,
+        tof_distance_mm=tof_distance_mm,
+    )
+
+    result = evaluate_measurements(DetectionState(), measurement, Settings())
+
+    assert result.detection is not None
+    assert result.detection.minute.valid_samples == 1
+    assert result.detection.minute.drowsy_samples == 0
