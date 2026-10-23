@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 
 import aiomqtt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -15,10 +16,9 @@ SENSOR_TOPIC_PATTERN = re.compile(r"drowsy/student([1-9]\d*)/data")
 
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-
     fsr: int = Field(ge=0, le=4095)
-    tof_mm: int = Field(gt=0)
-    timestamp_ms: float = Field(gt=0, allow_inf_nan=False)
+    tof: int = Field(gt=0)
+    present: int = Field(ge=0, le=1)
 
 
 class SensorMqttRouter:
@@ -89,12 +89,22 @@ class SensorMqttRouter:
             return
         try:
             sensor_payload = MqttSensorPayload.model_validate(payload_data)
-        except ValidationError:
-            logger.warning("Ignoring invalid MQTT sensor fields seat_id=%d", seat_id)
+        except ValidationError as error:
+            field_errors = "; ".join(
+                f"{'.'.join(str(part) for part in detail['loc']) or 'payload'}: "
+                f"{detail['type']}"
+                for detail in error.errors()
+            )
+            logger.warning(
+                "Ignoring invalid MQTT sensor fields seat_id=%d: %s",
+                seat_id,
+                field_errors,
+            )
             return
         measurements = SensorMeasurements(
             fsr_raw=sensor_payload.fsr,
-            tof_distance_mm=sensor_payload.tof_mm,
-            captured_at_ms=sensor_payload.timestamp_ms,
+            tof_distance_mm=sensor_payload.tof,
+            captured_at_ms=time.time_ns() / 1_000_000,
+            present=sensor_payload.present == 1,
         )
         await self._processing_facade.submit_sensor_measurements(seat_id, measurements)

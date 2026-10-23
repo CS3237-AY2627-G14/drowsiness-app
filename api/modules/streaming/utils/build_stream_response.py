@@ -15,6 +15,7 @@ def build_stream_response(status: StreamStatus, diagnostics: bool) -> StreamResp
             fatigue_probability=result.fatigue_probability,
             fsr_raw=result.fsr_raw,
             tof_distance_mm=result.tof_distance_mm,
+            present=result.present,
             minute=result.minute,
             alert=result.alert,
             face_detected=result.face_detected,

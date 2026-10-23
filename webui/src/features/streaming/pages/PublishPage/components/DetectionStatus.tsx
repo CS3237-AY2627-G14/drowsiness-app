@@ -62,6 +62,16 @@ export const DetectionStatus = ({ detection }: DetectionStatusProps) => {
               : `${detection.tof_distance_mm} mm`}
           </dd>
         </div>
+        <div>
+          <dt>Present</dt>
+          <dd>
+            {detection?.present == null
+              ? '—'
+              : detection.present
+                ? 'Yes'
+                : 'No'}
+          </dd>
+        </div>
       </dl>
       <p className="mt-4 text-xs text-[var(--sea-ink-soft)]">
         One picture per second counts toward the minute. An alert needs at least

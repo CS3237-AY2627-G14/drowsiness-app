@@ -55,6 +55,7 @@ class DetectionSnapshot(BaseModel):
     fatigue_probability: float | None
     fsr_raw: int | None
     tof_distance_mm: int | None
+    present: bool | None
     minute: MinuteSummary
     alert: bool
     face_detected: bool

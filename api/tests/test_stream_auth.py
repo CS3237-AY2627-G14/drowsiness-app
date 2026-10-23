@@ -93,6 +93,7 @@ def test_socketio_authentication_and_status(client: TestClient) -> None:
         assert "processing_ms" not in status["detection"]
         assert "fatigue_seconds" not in status["detection"]
         assert status["detection"]["fatigue_probability"] == 0.1
+        assert status["detection"]["present"] is None
 
 
 def test_diagnostics_are_explicitly_requested(client: TestClient) -> None:

@@ -69,10 +69,11 @@ Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local acc
 in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
 The API subscribes to `drowsy/+/data`; topics named
 `drowsy/student<N>/data` map readings to seat N. Messages are UTF-8 JSON with
-`fsr` (0–4095), `tof_mm` (positive millimeters), and `timestamp_ms` (Unix epoch
-milliseconds). Fresh readings are included with that seat's camera detections.
-An FSR value of zero marks the seat unoccupied; ToF is reported but does not
-affect classification. Set `DROWSINESS_MQTT_ENABLED=false` to disable the
+`fsr` (0–4095), `tof` (positive millimeters), and `present` (0 or 1).
+The API timestamps each message when it receives it. Fresh readings are
+included with that seat's camera detections.
+`present: 0` or an FSR value of zero marks the seat unoccupied; ToF is reported
+but does not affect classification. Set `DROWSINESS_MQTT_ENABLED=false` to disable the
 subscriber, or override `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`.
 The subscriber retries when the broker is unavailable. Camera uploads continue
 to use Socket.IO at `/api/socket.io` through Vite's API proxy.

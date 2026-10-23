@@ -4,5 +4,5 @@ services:
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     ports:
-      - "127.0.0.1:1883:1883"
+      - "0.0.0.0:1883:1883"
     restart: unless-stopped
