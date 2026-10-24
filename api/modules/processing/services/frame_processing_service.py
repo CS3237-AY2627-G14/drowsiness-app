@@ -167,6 +167,7 @@ class FrameProcessingService:
                     update={
                         "fsr_raw": sensor_measurements.fsr_raw,
                         "tof_distance_mm": sensor_measurements.tof_distance_mm,
+                        "present": sensor_measurements.present,
                     }
                 )
             detection_state = evaluate_measurements(

@@ -4,6 +4,7 @@ export type DetectionResult = {
   fatigue_probability: number | null
   fsr_raw: number | null
   tof_distance_mm: number | null
+  present: boolean | null
   minute: {
     valid_samples: number
     drowsy_samples: number

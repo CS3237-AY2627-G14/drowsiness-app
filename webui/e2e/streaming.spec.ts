@@ -522,6 +522,9 @@ test('shows minute counts, updates the alert, and clears the summary on restart'
         captured_at_ms: 0,
         ear: 0.1,
         fatigue_probability: 0.9,
+        fsr_raw: 530,
+        tof_distance_mm: 129,
+        present: true,
         minute: {
           valid_samples: 42,
           drowsy_samples: drowsyPictures,
@@ -541,6 +544,7 @@ test('shows minute counts, updates the alert, and clears the summary on restart'
   await expect(
     page.getByRole('heading', { name: 'Drowsiness detected' }),
   ).toBeVisible()
+  await expect(results.getByText('Yes')).toBeVisible()
   await expect(results.getByText('22 of 42 valid pictures')).toBeVisible()
   drowsyPictures = 20
   await expect(
@@ -573,6 +577,9 @@ test('waits for enough valid pictures and does not invent observations between m
         captured_at_ms: 0,
         ear: 0.1,
         fatigue_probability: 0.9,
+        fsr_raw: 530,
+        tof_distance_mm: 129,
+        present: false,
         minute: {
           valid_samples: 10,
           drowsy_samples: 10,

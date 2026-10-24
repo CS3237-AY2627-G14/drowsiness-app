@@ -149,6 +149,7 @@ def test_unoccupied_sensor_sample_is_unknown_and_exposes_sensor_readings() -> No
         fatigue_probability=0.9,
         fsr_raw=0,
         tof_distance_mm=420,
+        present=False,
     )
 
     result = evaluate_measurements(DetectionState(), measurement, Settings())
@@ -158,6 +159,7 @@ def test_unoccupied_sensor_sample_is_unknown_and_exposes_sensor_readings() -> No
     assert result.detection.minute.drowsy_samples == 0
     assert result.detection.fsr_raw == 0
     assert result.detection.tof_distance_mm == 420
+    assert result.detection.present is False
 
 
 @pytest.mark.parametrize("tof_distance_mm", [1, 420, 4000])

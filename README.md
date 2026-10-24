@@ -62,18 +62,18 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access.
 State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
 The API subscribes to `drowsy/+/data`; `drowsy/student<N>/data` maps to seat N.
-Each message must be UTF-8 JSON with `fsr` (raw ADC value, 0–4095),
-`tof_mm` (positive distance in millimeters), and `timestamp_ms` (Unix epoch
-milliseconds), for example:
+Each message must be UTF-8 JSON with `fsr` (raw ADC value, 0–4095), `tof`
+(positive distance in millimeters), and `present` (0 or 1). The API timestamps
+each message when it receives it:
 
 ```json
-{"fsr": 1234, "tof_mm": 420, "timestamp_ms": 1792390000000}
+{"fsr": 530, "tof": 129, "present": 0}
 ```
 
 The latest sensor reading is attached to that seat's camera detection when it
-is no more than five seconds old. An FSR value of zero marks the seat
-unoccupied, so that camera sample is not counted as awake or drowsy. ToF is
-included in the live status for monitoring but does not affect classification
+is no more than five seconds old. `present: 0` or an FSR value of zero marks the
+seat unoccupied, so that camera sample is not counted as awake or drowsy. ToF
+is included in the live status for monitoring but does not affect classification
 until a calibrated drowsiness threshold is defined. Set
 `DROWSINESS_MQTT_ENABLED=false` to disable the subscriber, or override
 `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT` to use another broker.
@@ -85,11 +85,11 @@ running, start a camera stream for seat 1 and run this from `api/`:
 
 ```bash
 cd api
-uv run python scripts/publish_mqtt_test_data.py
+uv run python tests/test_publish_mqtt_test_data.py
 ```
 
 The script publishes ten fresh readings (one per second) with `fsr=1234` and
-`tof_mm=420` to `drowsy/student1/data`. Check that the values appear in the live
+`tof=420` to `drowsy/student1/data`. Check that the values appear in the live
 detection status. Change the node, values, count, or interval with its options.
 To test an unoccupied seat or another node:
 

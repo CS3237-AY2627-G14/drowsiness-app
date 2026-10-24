@@ -32,7 +32,7 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
 
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 1234, "tof_mm": 420, "timestamp_ms": 1792390000000}',
+            b'{"fsr": 1234, "tof": 420, "present": 1}',
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -55,6 +55,46 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
     asyncio.run(run())
 
 
+def test_sensor_message_without_timestamp_uses_presence_for_classification() -> None:
+    async def run() -> None:
+        processing_registry = InMemoryProcessingRegistry()
+        settings = Settings(demo_seat_count=1)
+        processing_service = FrameProcessingService(
+            processing_registry,
+            FrameBuffer(),
+            FakeFramePredictor(),
+            settings,
+        )
+        mqtt_router = SensorMqttRouter(settings, ProcessingFacade(processing_service))
+        connection_id = uuid4()
+        await processing_service.open_connection(connection_id)
+        await processing_service.associate_seat(connection_id, 1)
+
+        await mqtt_router._handle_message(
+            "drowsy/student1/data",
+            b'{"fsr": 530, "tof": 129, "present": 0}',
+        )
+        processing_service._apply_frame_measurements(
+            FrameMeasurements(
+                connection_id=connection_id,
+                frame_id=1,
+                captured_at_ms=1792390000000,
+                left_ear=0.1,
+                right_ear=0.1,
+            )
+        )
+
+        record = processing_registry.get(connection_id)
+        assert record is not None and record.detection_state.detection is not None
+        result = record.detection_state.detection
+        assert result.fsr_raw == 530
+        assert result.tof_distance_mm == 129
+        assert result.minute.valid_samples == 0
+        assert result.minute.drowsy_samples == 0
+
+    asyncio.run(run())
+
+
 def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
     async def run() -> None:
         processing_registry = InMemoryProcessingRegistry()
@@ -72,11 +112,11 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
 
         await mqtt_router._handle_message(
             "drowsy/student2/data",
-            b'{"fsr": 1234, "tof_mm": 420, "timestamp_ms": 1792390000000}',
+            b'{"fsr": 1234, "tof": 420, "present": 1}',
         )
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 5000, "tof_mm": 420, "timestamp_ms": 1792390000000}',
+            b'{"fsr": 5000, "tof": 420, "present": 1}',
         )
         await mqtt_router._handle_message("drowsy/student1/data", b"not-json")
         processing_service._apply_frame_measurements(
@@ -116,7 +156,7 @@ def test_expired_sensor_measurements_do_not_change_camera_classification() -> No
         await processing_service.associate_seat(connection_id, 1)
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 0, "tof_mm": 420, "timestamp_ms": 1792390000000}',
+            b'{"fsr": 0, "tof": 420, "present": 1}',
         )
         timer.current_time = 5.1
         processing_service._apply_frame_measurements(
