@@ -67,16 +67,19 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access. State is
 in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-The API subscribes to `drowsy/+/data`; topics named
-`drowsy/student<N>/data` map readings to seat N. Messages are UTF-8 JSON with
-`fsr` (0–4095), `tof` (positive millimeters), and `present` (0 or 1).
+The API subscribes to `drowsy/+/data` and `wakey/+/sensors`; topics named
+`drowsy/student<N>/data` or `wakey/student<N>/sensors` map readings to seat N.
+Messages are UTF-8 JSON with `fsr` (0–4095), `tof` (millimeters; `-1` means
+no valid ToF reading), and `present` (0 or 1).
 The API timestamps each message when it receives it. Fresh readings are
 included with that seat's camera detections.
 `present: 0` or an FSR value of zero marks the seat unoccupied; ToF is reported
-but does not affect classification. Set `DROWSINESS_MQTT_ENABLED=false` to disable the
-subscriber, or override `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`.
-The subscriber retries when the broker is unavailable. Camera uploads continue
-to use Socket.IO at `/api/socket.io` through Vite's API proxy.
+but does not affect classification. Set `DROWSINESS_MQTT_ENABLED=false` to disable
+MQTT input and output, or override `DROWSINESS_MQTT_HOST` and
+`DROWSINESS_MQTT_PORT`. The subscriber and result publisher retry when the broker
+is unavailable. When the drowsiness alert turns on, the API publishes
+`{"id": "A1"}` to `drowsy/result` at QoS 1; `B1` will be added later. Camera
+uploads continue to use Socket.IO at `/api/socket.io` through Vite's API proxy.
 
 For a local test publisher and the full sensor behavior details, see the
 [MQTT guide](../README.md#mqtt).

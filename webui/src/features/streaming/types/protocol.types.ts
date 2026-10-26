@@ -32,6 +32,7 @@ export type StreamStatus = {
   type: 'status'
   detection: DetectionResult | null
   diagnostics: StreamDiagnostics | null
+  mqtt_alert_sent_recently?: boolean
 }
 
 export type StreamError = {

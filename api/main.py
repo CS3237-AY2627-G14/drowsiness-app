@@ -16,6 +16,7 @@ from modules.classrooms.service import ClassroomsService
 from modules.processing.facade import ProcessingFacade
 from modules.processing.inference import InferenceRuntime, create_inference_runtime
 from modules.processing.inference.frame_buffer import FrameBuffer
+from modules.processing.mqtt_result_publisher import MqttResultPublisher
 from modules.processing.mqtt_router import SensorMqttRouter
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
 from modules.processing.services.frame_processing_service import FrameProcessingService
@@ -78,6 +79,7 @@ def build_streaming(
     socket_server: socketio.AsyncServer,
     sessions_facade: SessionsFacade,
     inference_runtime: InferenceRuntime,
+    mqtt_result_publisher: MqttResultPublisher,
 ) -> tuple[StreamingSocketRouter, FrameProcessingService, ProcessingFacade]:
     processing_registry = InMemoryProcessingRegistry()
     frame_buffer = FrameBuffer()
@@ -86,6 +88,7 @@ def build_streaming(
         frame_buffer,
         inference_runtime.frame_predictor,
         configuration,
+        mqtt_result_publisher=mqtt_result_publisher,
     )
     processing_facade = ProcessingFacade(frame_processing_service)
     streaming_registry = InMemoryStreamingRegistry()
@@ -127,17 +130,23 @@ def create_app(
         )
         application.state.classrooms_facade = classrooms_facade
         async with inference_factory(configuration) as inference_runtime:
+            mqtt_result_publisher = MqttResultPublisher(configuration)
             (
                 streaming_socket_router,
                 frame_processing_service,
                 processing_facade,
             ) = build_streaming(
-                configuration, socket_server, sessions_facade, inference_runtime
+                configuration,
+                socket_server,
+                sessions_facade,
+                inference_runtime,
+                mqtt_result_publisher,
             )
             sensor_mqtt_router = SensorMqttRouter(configuration, processing_facade)
             try:
                 frame_processing_service.start(inference_runtime.workers)
                 sensor_mqtt_router.start()
+                mqtt_result_publisher.start()
                 yield
             finally:
                 try:
@@ -146,7 +155,10 @@ def create_app(
                     try:
                         await streaming_socket_router.stop()
                     finally:
-                        await frame_processing_service.stop()
+                        try:
+                            await frame_processing_service.stop()
+                        finally:
+                            await mqtt_result_publisher.stop()
 
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)
     application.include_router(classrooms_router)
