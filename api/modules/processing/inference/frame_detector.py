@@ -190,6 +190,32 @@ def predict_fatigue_probabilities(
     return probabilities
 
 
+def _prepare_frame(
+    work: QueuedFrame, resources: DetectorResources
+) -> tuple[FrameMeasurements, torch.Tensor | None]:
+    measurements = FrameMeasurements(
+        connection_id=work.connection_id,
+        frame_id=work.frame.frame_id,
+        captured_at_ms=work.frame.captured_at_ms,
+    )
+    try:
+        rgb = decode_frame_image(work.frame.jpeg, resources.settings)
+    except (OSError, ValueError, Image.DecompressionBombError):
+        invalid_measurements = measurements.model_copy(
+            update={"error": "invalid_frame"}
+        )
+        return invalid_measurements, None
+    left_ear, right_ear = measure_eye_openness(resources.mesh, rgb)
+    measurements = measurements.model_copy(
+        update={"left_ear": left_ear, "right_ear": right_ear}
+    )
+    face_crop = detect_face_crop(resources.face_detector, rgb)
+    if face_crop is None:
+        return measurements, None
+    face_tensor = resources.transform(face_crop)
+    return measurements, face_tensor
+
+
 def predict_batch(batch: tuple[QueuedFrame, ...]) -> tuple[FrameMeasurements, ...]:
     resources = _resources
     assert resources is not None
@@ -197,30 +223,12 @@ def predict_batch(batch: tuple[QueuedFrame, ...]) -> tuple[FrameMeasurements, ..
     batch_measurements: list[FrameMeasurements] = []
     faces: list[torch.Tensor] = []
     face_indices: list[int] = []
-    for work in batch:
-        measurements = FrameMeasurements(
-            connection_id=work.connection_id,
-            frame_id=work.frame.frame_id,
-            captured_at_ms=work.frame.captured_at_ms,
-        )
-        try:
-            rgb = decode_frame_image(work.frame.jpeg, resources.settings)
-        except (OSError, ValueError, Image.DecompressionBombError):
-            invalid_measurements = measurements.model_copy(
-                update={"error": "invalid_frame"}
-            )
-            batch_measurements.append(invalid_measurements)
-            continue
-        left_ear, right_ear = measure_eye_openness(resources.mesh, rgb)
-        measurements = measurements.model_copy(
-            update={"left_ear": left_ear, "right_ear": right_ear}
-        )
-        face_crop = detect_face_crop(resources.face_detector, rgb)
-        if face_crop is not None:
-            face_tensor = resources.transform(face_crop)
-            faces.append(face_tensor)
-            face_indices.append(len(batch_measurements))
+    for index, work in enumerate(batch):
+        measurements, face_tensor = _prepare_frame(work, resources)
         batch_measurements.append(measurements)
+        if face_tensor is not None:
+            faces.append(face_tensor)
+            face_indices.append(index)
     if faces:
         probabilities = predict_fatigue_probabilities(resources, faces)
         for index, probability in zip(face_indices, probabilities, strict=True):

@@ -1,6 +1,10 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+)
 
 import socketio
 from fastapi import FastAPI
@@ -151,18 +155,13 @@ def create_app(
             sensor_mqtt_router = SensorMqttRouter(
                 configuration, processing_facade, status_updates
             )
-            try:
+            async with AsyncExitStack() as shutdown_stack:
+                shutdown_stack.push_async_callback(frame_processing_service.stop)
+                shutdown_stack.push_async_callback(streaming_socket_router.stop)
+                shutdown_stack.push_async_callback(sensor_mqtt_router.stop)
                 frame_processing_service.start(inference_runtime.workers)
                 sensor_mqtt_router.start()
                 yield
-            finally:
-                try:
-                    await sensor_mqtt_router.stop()
-                finally:
-                    try:
-                        await streaming_socket_router.stop()
-                    finally:
-                        await frame_processing_service.stop()
 
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)
     application.include_router(classrooms_router)

@@ -2,6 +2,8 @@ import asyncio
 import json
 from uuid import UUID, uuid4
 
+import pytest
+
 from core.config import Settings
 from modules.processing.facade import ProcessingFacade
 from modules.processing.inference.frame_buffer import FrameBuffer
@@ -251,6 +253,8 @@ def test_zero_fsr_reclassifies_latest_camera_sample() -> None:
 
         record = registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
+        assert record.processed_frames == 1
+        assert len(record.detection_state.samples) == 1
         assert record.detection_state.samples[-1].drowsy is None
         assert record.detection_state.detection.fsr_raw == 0
         assert publisher.updates == [
@@ -356,6 +360,157 @@ def test_invalid_sensor_topics_and_payloads_do_not_publish() -> None:
         )
 
         assert publisher.updates == []
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("seat_id", [None, 1])
+@pytest.mark.parametrize("error", [None, "invalid_frame"])
+def test_frame_results_increment_counters_only_for_successful_frames(
+    seat_id: int | None, error: str | None
+) -> None:
+    async def run() -> None:
+        processing_service, _mqtt_router, registry = _runtime(1)
+        connection_id = uuid4()
+        await processing_service.open_connection(connection_id)
+        if seat_id is not None:
+            await processing_service.associate_seat(connection_id, seat_id)
+
+        first = _camera_frame(connection_id, 1, 1000.0)
+        second = _camera_frame(connection_id, 2, 2000.0)
+        second = second.model_copy(update={"error": error})
+        processing_service._apply_frame_measurements(first)
+        processing_service._apply_frame_measurements(second)
+
+        record = registry.get(connection_id)
+        assert record is not None and record.detection_state.detection is not None
+        expected_frames = 2 if error is None else 1
+        assert record.processed_frames == expected_frames
+        assert len(record.detection_state.samples) == expected_frames
+        assert record.detection_state.detection.frame_id == expected_frames
+        assert record.error == error
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("timestamp_ms", [1000.0, 2000.0])
+def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
+    timestamp_ms: float,
+) -> None:
+    async def run() -> None:
+        publisher = RecordingStatusPublisher()
+        timer = MutableTimer()
+        processing_service, mqtt_router, registry = _runtime(1, publisher, timer)
+        connection_id = uuid4()
+        await processing_service.open_connection(connection_id)
+        await processing_service.associate_seat(connection_id, 1)
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(100, 420, 2000.0)
+        )
+        processing_service._apply_frame_measurements(
+            _camera_frame(connection_id, 1, 2000.0)
+        )
+        previous_record = registry.get(connection_id)
+        publisher.updates.clear()
+        timer.current_time = 1.0
+
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(0, 999, timestamp_ms)
+        )
+
+        assert registry.get(connection_id) == previous_record
+        assert publisher.updates == []
+
+    asyncio.run(run())
+
+
+def test_sensor_publish_intervals_are_per_seat_and_unaffected_by_camera_updates() -> (
+    None
+):
+    async def run() -> None:
+        publisher = RecordingStatusPublisher()
+        timer = MutableTimer()
+        processing_service, mqtt_router, _registry = _runtime(2, publisher, timer)
+        connection_id = uuid4()
+        await processing_service.open_connection(connection_id)
+        await processing_service.associate_seat(connection_id, 1)
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(100, 420, 1000.0)
+        )
+        timer.current_time = 0.5
+        await mqtt_router._handle_message(
+            "drowsy/stud/2/data", _sensor_message(100, 420, 1000.0)
+        )
+        assert len(publisher.updates) == 2
+
+        timer.current_time = 0.999
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(100, 420, 2000.0)
+        )
+        assert len(publisher.updates) == 2
+        processing_service._apply_frame_measurements(
+            _camera_frame(connection_id, 1, 2000.0)
+        )
+        assert len(publisher.updates) == 3
+
+        timer.current_time = 1.0
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(100, 420, 3000.0)
+        )
+        assert len(publisher.updates) == 4
+        timer.current_time = 1.499
+        await mqtt_router._handle_message(
+            "drowsy/stud/2/data", _sensor_message(100, 420, 2000.0)
+        )
+        assert len(publisher.updates) == 4
+        timer.current_time = 1.5
+        await mqtt_router._handle_message(
+            "drowsy/stud/2/data", _sensor_message(100, 420, 3000.0)
+        )
+        assert publisher.updates == [
+            SeatStatusUpdate(student=StudentSeatStatus(seat_id=seat_id, drowsy=False))
+            for seat_id in (1, 2, 1, 1, 2)
+        ]
+
+    asyncio.run(run())
+
+
+def test_sensor_alert_changes_bypass_throttling_and_reset_the_interval() -> None:
+    async def run() -> None:
+        publisher = RecordingStatusPublisher()
+        timer = MutableTimer()
+        processing_service, mqtt_router, _registry = _runtime(1, publisher, timer)
+        connection_id = uuid4()
+        await processing_service.open_connection(connection_id)
+        await processing_service.associate_seat(connection_id, 1)
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(100, 420, 1000.0)
+        )
+        _raise_alert(processing_service, connection_id)
+        publisher.updates.clear()
+
+        timer.current_time = 0.25
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(0, 420, 31000.0)
+        )
+        cleared_alert = SeatStatusUpdate(
+            student=StudentSeatStatus(seat_id=1, drowsy=False), drowsy_seats=()
+        )
+        assert publisher.updates == [cleared_alert]
+
+        timer.current_time = 1.0
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(0, 420, 32000.0)
+        )
+        assert publisher.updates == [cleared_alert]
+        timer.current_time = 1.25
+        await mqtt_router._handle_message(
+            "drowsy/stud/1/data", _sensor_message(0, 420, 33000.0)
+        )
+        assert publisher.updates == [
+            cleared_alert,
+            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False)),
+        ]
 
     asyncio.run(run())
 
