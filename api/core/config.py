@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     max_pending_seconds: float = Field(default=1.0, gt=0)
     ear_threshold: float = Field(default=0.21, gt=0)
     fatigue_threshold: float = Field(default=0.65, gt=0, le=1)
+    fsr_threshold: int = Field(default=50, ge=0, le=4095)
+    tof_threshold_mm: int = Field(default=2000, gt=0)
     mqtt_enabled: bool = True
     mqtt_host: str = "127.0.0.1"
     mqtt_port: PositiveInt = 1883

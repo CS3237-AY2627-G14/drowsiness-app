@@ -76,9 +76,10 @@ export const DetectionStatus = ({ detection }: DetectionStatusProps) => {
       <p className="mt-4 text-xs text-[var(--sea-ink-soft)]">
         One picture per second counts toward the minute. An alert needs at least
         30 valid pictures, with half or more showing signs of drowsiness.
-        Missing pictures do not count as awake. A fresh FSR reading of zero
-        marks the seat unoccupied; ToF is shown for monitoring and does not yet
-        affect the drowsiness classification.
+        Missing pictures do not count as awake. A picture is classified as
+        drowsy only when the camera detects drowsiness, both sensor readings are
+        fresh, and FSR is above 50 or ToF distance is above 2000 mm. An FSR
+        reading of zero marks the seat unoccupied.
       </p>
       {detection?.fsr_raw === 0 ? (
         <p className="mt-2 text-sm">Seat unoccupied.</p>

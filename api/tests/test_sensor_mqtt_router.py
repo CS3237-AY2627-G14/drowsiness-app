@@ -133,12 +133,13 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
         assert result.fsr_raw is None and result.tof_distance_mm is None
-        assert result.minute.drowsy_samples == 1
+        assert result.minute.valid_samples == 0
+        assert result.minute.drowsy_samples == 0
 
     asyncio.run(run())
 
 
-def test_expired_sensor_measurements_do_not_change_camera_classification() -> None:
+def test_expired_sensor_measurements_make_camera_drowsiness_unavailable() -> None:
     async def run() -> None:
         processing_registry = InMemoryProcessingRegistry()
         timer = MutableTimer()
@@ -173,6 +174,7 @@ def test_expired_sensor_measurements_do_not_change_camera_classification() -> No
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
         assert result.fsr_raw is None and result.tof_distance_mm is None
-        assert result.minute.drowsy_samples == 1
+        assert result.minute.valid_samples == 0
+        assert result.minute.drowsy_samples == 0
 
     asyncio.run(run())
