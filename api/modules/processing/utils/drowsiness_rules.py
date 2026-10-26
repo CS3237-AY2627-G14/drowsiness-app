@@ -15,7 +15,7 @@ def calculate_mean_ear(measurements: FrameMeasurements) -> float | None:
         return None
     return (left_ear + right_ear) / 2
 
-
+# if camera classifies drowsy check TOF OR FSR thresholds to double check if drowsy
 def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool | None:
     if measurements.present is False or measurements.fsr_raw == 0:
         return None
@@ -33,7 +33,15 @@ def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool 
     has_fatigue_prediction = (
         probability is not None and probability >= settings.fatigue_threshold
     )
-    return are_eyes_closed or has_fatigue_prediction
+    camera_classifies_drowsy = are_eyes_closed or has_fatigue_prediction
+    if not camera_classifies_drowsy:
+        return False
+    if measurements.fsr_raw is None or measurements.tof_distance_mm is None:
+        return None
+    return (
+        measurements.fsr_raw > settings.fsr_threshold
+        or measurements.tof_distance_mm > settings.tof_threshold_mm
+    )
 
 
 def update_detection_window(
