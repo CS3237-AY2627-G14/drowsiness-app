@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
@@ -17,6 +18,7 @@ from modules.processing.facade import ProcessingFacade
 from modules.processing.inference import InferenceRuntime, create_inference_runtime
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.mqtt_router import SensorMqttRouter
+from modules.processing.publishing import QueueSeatStatusPublisher, SeatStatusUpdate
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
 from modules.processing.services.frame_processing_service import FrameProcessingService
 from modules.sessions.facade import SessionsFacade
@@ -78,6 +80,7 @@ def build_streaming(
     socket_server: socketio.AsyncServer,
     sessions_facade: SessionsFacade,
     inference_runtime: InferenceRuntime,
+    status_publisher: QueueSeatStatusPublisher | None = None,
 ) -> tuple[StreamingSocketRouter, FrameProcessingService, ProcessingFacade]:
     processing_registry = InMemoryProcessingRegistry()
     frame_buffer = FrameBuffer()
@@ -86,6 +89,7 @@ def build_streaming(
         frame_buffer,
         inference_runtime.frame_predictor,
         configuration,
+        status_publisher=status_publisher,
     )
     processing_facade = ProcessingFacade(frame_processing_service)
     streaming_registry = InMemoryStreamingRegistry()
@@ -126,15 +130,27 @@ def create_app(
             configuration, classrooms_facade, seats, application_clock
         )
         application.state.classrooms_facade = classrooms_facade
+        status_updates: asyncio.Queue[SeatStatusUpdate] = asyncio.Queue()
+        status_publisher = (
+            QueueSeatStatusPublisher(status_updates)
+            if configuration.mqtt_enabled
+            else None
+        )
         async with inference_factory(configuration) as inference_runtime:
             (
                 streaming_socket_router,
                 frame_processing_service,
                 processing_facade,
             ) = build_streaming(
-                configuration, socket_server, sessions_facade, inference_runtime
+                configuration,
+                socket_server,
+                sessions_facade,
+                inference_runtime,
+                status_publisher,
             )
-            sensor_mqtt_router = SensorMqttRouter(configuration, processing_facade)
+            sensor_mqtt_router = SensorMqttRouter(
+                configuration, processing_facade, status_updates
+            )
             try:
                 frame_processing_service.start(inference_runtime.workers)
                 sensor_mqtt_router.start()

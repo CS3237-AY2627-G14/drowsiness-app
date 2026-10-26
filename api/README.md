@@ -65,17 +65,21 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access. State is
-in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-The API subscribes to `drowsy/+/data`; topics named
-`drowsy/student<N>/data` map readings to seat N. Messages are UTF-8 JSON with
-`fsr` (0–4095), `tof_mm` (positive millimeters), and `timestamp_ms` (Unix epoch
-milliseconds). Fresh readings are included with that seat's camera detections.
-An FSR value of zero marks the seat unoccupied; ToF is reported but does not
-affect classification. Set `DROWSINESS_MQTT_ENABLED=false` to disable the
-subscriber, or override `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`.
-The subscriber retries when the broker is unavailable. Camera uploads continue
-to use Socket.IO at `/api/socket.io` through Vite's API proxy.
+Mosquitto listens on port `1883` of the Docker host with anonymous local access,
+so classroom nodes on the same network can connect. State is in memory and lost
+on restart. Use `docker compose logs -f mqtt` for logs. The API subscribes to
+`drowsy/stud/+/data`; `drowsy/stud/<seat_id>/data` maps to that seat. Messages
+are UTF-8 JSON with `fsr` (0–4095), `tof_mm` (positive millimeters), and
+`timestamp_ms` (Unix epoch milliseconds). Each seat keeps an in-memory row.
+Fresh readings are included with that seat's camera samples. An FSR value of
+zero marks the latest sample unoccupied; ToF does not affect
+classification. The API publishes `{"drowsy": true}` or `{"drowsy": false}` to
+`drowsy/stud/<seat_id>/result` and, when the drowsy set changes, a retained
+`{"drowsy_seats": [...]}` message to `drowsy/lect/result`. Set
+`DROWSINESS_MQTT_ENABLED=false` to disable the client, or override
+`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. The client retries when the
+broker is unavailable. Camera uploads continue to use Socket.IO at
+`/api/socket.io` through Vite's API proxy.
 
 For a local test publisher and the full sensor behavior details, see the
 [MQTT guide](../README.md#mqtt).

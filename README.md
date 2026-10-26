@@ -38,7 +38,7 @@ Open http://localhost:3000/streaming. Select a seat, start the camera, then Publ
 The API runs at http://localhost:8000; health is at `/health` and API docs at
 `/docs`. Stop the app terminals with Ctrl+C and the broker with
 `docker compose down` from `api/`.
-MQTT application integration is not implemented yet; camera uploads use Socket.IO.
+Camera uploads use Socket.IO. Student sensors and lecturer alerts use MQTT.
 
 ## Configuration
 
@@ -59,10 +59,11 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access.
-State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-The API subscribes to `drowsy/+/data`; `drowsy/student<N>/data` maps to seat N.
-Each message must be UTF-8 JSON with `fsr` (raw ADC value, 0–4095),
+Mosquitto listens on port `1883` of the Docker host with anonymous local access,
+so classroom nodes on the same network can connect. State is in memory and lost
+on restart. Use `docker compose logs -f mqtt` for logs.
+The API subscribes to `drowsy/stud/+/data`. `drowsy/stud/<seat_id>/data` maps to
+that seat. Each message must be UTF-8 JSON with `fsr` (raw ADC value, 0–4095),
 `tof_mm` (positive distance in millimeters), and `timestamp_ms` (Unix epoch
 milliseconds), for example:
 
@@ -70,14 +71,29 @@ milliseconds), for example:
 {"fsr": 1234, "tof_mm": 420, "timestamp_ms": 1792390000000}
 ```
 
-The latest sensor reading is attached to that seat's camera detection when it
-is no more than five seconds old. An FSR value of zero marks the seat
-unoccupied, so that camera sample is not counted as awake or drowsy. ToF is
-included in the live status for monitoring but does not affect classification
-until a calibrated drowsiness threshold is defined. Set
-`DROWSINESS_MQTT_ENABLED=false` to disable the subscriber, or override
+The API keeps one in-memory row per seat. A sensor message updates that row.
+A camera frame adds one sample to the row's minute window, using the sensor
+reading when it is no more than five seconds old. An FSR value of zero marks
+the latest sample unoccupied, so it is not counted as awake or drowsy. ToF is
+stored on the seat row but does not affect classification. The alert still needs
+at least 30 valid samples in the minute, with at least half drowsy.
+
+After each update the API publishes that seat to `drowsy/stud/<seat_id>/result`:
+
+```json
+{"drowsy": false}
+```
+
+When the set of drowsy seats changes, it publishes a retained message to
+`drowsy/lect/result` containing only those seat ids:
+
+```json
+{"drowsy_seats": [1, 3]}
+```
+
+Set `DROWSINESS_MQTT_ENABLED=false` to disable the client, or override
 `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT` to use another broker.
-The subscriber retries if the broker is unavailable. Camera uploads continue
+The client retries if the broker is unavailable. Camera uploads continue
 to use Socket.IO at `/api/socket.io` through Vite's API proxy.
 
 To send a test reading to the local broker while the API and frontend are
@@ -89,7 +105,7 @@ uv run python scripts/publish_mqtt_test_data.py
 ```
 
 The script publishes ten fresh readings (one per second) with `fsr=1234` and
-`tof_mm=420` to `drowsy/student1/data`. Check that the values appear in the live
+`tof_mm=420` to `drowsy/stud/1/data`. Check that the values appear in the live
 detection status. Change the node, values, count, or interval with its options.
 To test an unoccupied seat or another node:
 

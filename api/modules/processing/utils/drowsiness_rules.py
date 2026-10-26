@@ -90,3 +90,28 @@ def evaluate_measurements(
         alert=alert,
     )
     return DetectionState(samples=samples, detection=detection)
+
+
+def reclassify_latest_sample(
+    state: DetectionState, measurements: FrameMeasurements, settings: Settings
+) -> DetectionState:
+    """Replace the latest sample's decision without appending another sample."""
+    detection = state.detection
+    if not state.samples or detection is None:
+        return state
+    latest_sample = state.samples[-1]
+    is_drowsy = classify_frame(measurements, settings)
+    samples = (
+        *state.samples[:-1],
+        DetectionSample(captured_at_ms=latest_sample.captured_at_ms, drowsy=is_drowsy),
+    )
+    minute = build_minute_summary(samples)
+    updated_detection = detection.model_copy(
+        update={
+            "fsr_raw": measurements.fsr_raw,
+            "tof_distance_mm": measurements.tof_distance_mm,
+            "minute": minute,
+            "alert": should_raise_alert(minute),
+        }
+    )
+    return DetectionState(samples=samples, detection=updated_detection)

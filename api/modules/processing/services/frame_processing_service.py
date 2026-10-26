@@ -2,13 +2,21 @@ import asyncio
 import logging
 from uuid import UUID
 
+from pydantic import BaseModel, ConfigDict
+
 from core.clock import MonotonicTimer, Timer
 from core.config import Settings
 from modules.processing.exceptions import ProcessingException
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.inference.frame_predictor import FramePredictor
+from modules.processing.publishing import (
+    SeatStatusPublisher,
+    SeatStatusUpdate,
+    StudentSeatStatus,
+)
 from modules.processing.repositories.registry import ProcessingRegistry
 from modules.processing.schemas import (
+    DetectionState,
     FrameInput,
     FrameMeasurements,
     ProcessingRecord,
@@ -16,13 +24,30 @@ from modules.processing.schemas import (
     QueuedFrame,
     SensorMeasurements,
 )
-from modules.processing.utils.drowsiness_rules import evaluate_measurements
+from modules.processing.utils.drowsiness_rules import (
+    evaluate_measurements,
+    reclassify_latest_sample,
+)
 
 logger = logging.getLogger(__name__)
+SENSOR_STATUS_INTERVAL_SECONDS = 1.0
+
+
+class SeatRow(BaseModel):
+    """Latest sensor reading and minute window for one seat."""
+
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    fsr_raw: int | None = None
+    tof_distance_mm: int | None = None
+    captured_at_ms: float | None = None
+    received_at: float | None = None
+    latest_camera: FrameMeasurements | None = None
+    detection_state: DetectionState = DetectionState()
 
 
 class FrameProcessingService:
-    """Admit camera frames, schedule inference and maintain per-camera results."""
+    """Admit camera frames, schedule inference and maintain per-seat results."""
 
     def __init__(
         self,
@@ -31,18 +56,20 @@ class FrameProcessingService:
         frame_predictor: FramePredictor,
         settings: Settings,
         timer: Timer | None = None,
+        status_publisher: SeatStatusPublisher | None = None,
     ) -> None:
         self._processing_registry = processing_registry
         self._frame_buffer = frame_buffer
         self._frame_predictor = frame_predictor
         self._settings = settings
         self._timer = timer if timer is not None else MonotonicTimer()
+        self._status_publisher = status_publisher
         self._available = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
         self._failed = False
-        self._sensor_measurements_by_seat: dict[
-            int, tuple[SensorMeasurements, float]
-        ] = {}
+        self._seat_rows: dict[int, SeatRow] = {}
+        self._connection_by_seat: dict[int, UUID] = {}
+        self._last_sensor_publish_at: dict[int, float] = {}
 
     def start(self, workers: int) -> None:
         self._tasks = [
@@ -72,6 +99,13 @@ class FrameProcessingService:
 
     async def associate_seat(self, connection_id: UUID, seat_id: int) -> None:
         record = self._get_active_record(connection_id)
+        previous_seat = record.seat_id
+        if (
+            previous_seat is not None
+            and self._connection_by_seat.get(previous_seat) == connection_id
+        ):
+            del self._connection_by_seat[previous_seat]
+        self._connection_by_seat[seat_id] = connection_id
         self._processing_registry.save(
             connection_id, record.model_copy(update={"seat_id": seat_id})
         )
@@ -79,16 +113,38 @@ class FrameProcessingService:
     async def submit_sensor_measurements(
         self, seat_id: int, measurements: SensorMeasurements
     ) -> None:
-        latest = self._sensor_measurements_by_seat.get(seat_id)
+        row = self._seat_rows.get(seat_id, SeatRow())
         if (
-            latest is not None
-            and measurements.captured_at_ms <= latest[0].captured_at_ms
+            row.captured_at_ms is not None
+            and measurements.captured_at_ms <= row.captured_at_ms
         ):
             return
-        self._sensor_measurements_by_seat[seat_id] = (
-            measurements,
-            self._timer.now(),
+        previous_drowsy = self._drowsy_seat_ids()
+        updated_row = row.model_copy(
+            update={
+                "fsr_raw": measurements.fsr_raw,
+                "tof_distance_mm": measurements.tof_distance_mm,
+                "captured_at_ms": measurements.captured_at_ms,
+                "received_at": self._timer.now(),
+            }
         )
+        camera = updated_row.latest_camera
+        if camera is not None and updated_row.detection_state.samples:
+            measured = camera.model_copy(
+                update={
+                    "fsr_raw": measurements.fsr_raw,
+                    "tof_distance_mm": measurements.tof_distance_mm,
+                }
+            )
+            detection_state = reclassify_latest_sample(
+                updated_row.detection_state, measured, self._settings
+            )
+            updated_row = updated_row.model_copy(
+                update={"detection_state": detection_state}
+            )
+        self._seat_rows[seat_id] = updated_row
+        self._save_connection_detection(seat_id, updated_row.detection_state)
+        self._publish_seat(seat_id, previous_drowsy, sensor_driven=True)
 
     def _get_active_record(self, connection_id: UUID) -> ProcessingRecord:
         if self._failed:
@@ -127,8 +183,21 @@ class FrameProcessingService:
         )
 
     async def close_connection(self, connection_id: UUID) -> None:
+        record = self._processing_registry.get(connection_id)
+        seat_id = record.seat_id if record is not None else None
         self._processing_registry.remove(connection_id)
         self._frame_buffer.discard_pending(connection_id)
+        if seat_id is None or self._connection_by_seat.get(seat_id) != connection_id:
+            return
+        del self._connection_by_seat[seat_id]
+        row = self._seat_rows.get(seat_id)
+        if row is None or row.detection_state.detection is None:
+            return
+        previous_drowsy = self._drowsy_seat_ids()
+        self._seat_rows[seat_id] = row.model_copy(
+            update={"latest_camera": None, "detection_state": DetectionState()}
+        )
+        self._publish_seat(seat_id, previous_drowsy, sensor_driven=False)
 
     async def _process_frames(self) -> None:
         while not self._failed:
@@ -151,24 +220,10 @@ class FrameProcessingService:
             return
         if measurements.error:
             updated_record = record.model_copy(update={"error": measurements.error})
-        else:
-            sensor_entry = (
-                self._sensor_measurements_by_seat.get(record.seat_id)
-                if record.seat_id is not None
-                else None
-            )
-            if (
-                sensor_entry is not None
-                and self._timer.now() - sensor_entry[1]
-                <= self._settings.mqtt_sensor_max_age_seconds
-            ):
-                sensor_measurements = sensor_entry[0]
-                measurements = measurements.model_copy(
-                    update={
-                        "fsr_raw": sensor_measurements.fsr_raw,
-                        "tof_distance_mm": sensor_measurements.tof_distance_mm,
-                    }
-                )
+            self._processing_registry.save(measurements.connection_id, updated_record)
+            return
+        seat_id = record.seat_id
+        if seat_id is None:
             detection_state = evaluate_measurements(
                 record.detection_state, measurements, self._settings
             )
@@ -178,7 +233,119 @@ class FrameProcessingService:
                     "processed_frames": record.processed_frames + 1,
                 }
             )
+            self._processing_registry.save(measurements.connection_id, updated_record)
+            return
+        previous_drowsy = self._drowsy_seat_ids()
+        row = self._seat_rows.get(seat_id, SeatRow())
+        measured = self._with_fresh_sensor(row, measurements)
+        detection_state = evaluate_measurements(
+            row.detection_state, measured, self._settings
+        )
+        updated_row = row.model_copy(
+            update={
+                "latest_camera": measurements,
+                "detection_state": detection_state,
+            }
+        )
+        self._seat_rows[seat_id] = updated_row
+        self._connection_by_seat[seat_id] = measurements.connection_id
+        updated_record = record.model_copy(
+            update={
+                "detection_state": detection_state,
+                "processed_frames": record.processed_frames + 1,
+            }
+        )
         self._processing_registry.save(measurements.connection_id, updated_record)
+        self._publish_seat(seat_id, previous_drowsy, sensor_driven=False)
+
+    def _with_fresh_sensor(
+        self, row: SeatRow, measurements: FrameMeasurements
+    ) -> FrameMeasurements:
+        fsr_raw, tof_distance_mm = self._fresh_sensor_values(row)
+        if fsr_raw is None or tof_distance_mm is None:
+            return measurements
+        return measurements.model_copy(
+            update={
+                "fsr_raw": fsr_raw,
+                "tof_distance_mm": tof_distance_mm,
+            }
+        )
+
+    def _fresh_sensor_values(self, row: SeatRow) -> tuple[int | None, int | None]:
+        if (
+            row.received_at is None
+            or row.fsr_raw is None
+            or row.tof_distance_mm is None
+            or self._timer.now() - row.received_at
+            > self._settings.mqtt_sensor_max_age_seconds
+        ):
+            return None, None
+        return row.fsr_raw, row.tof_distance_mm
+
+    def _save_connection_detection(
+        self, seat_id: int, detection_state: DetectionState
+    ) -> None:
+        connection_id = self._connection_by_seat.get(seat_id)
+        if connection_id is None:
+            return
+        record = self._processing_registry.get(connection_id)
+        if record is None:
+            return
+        self._processing_registry.save(
+            connection_id,
+            record.model_copy(update={"detection_state": detection_state}),
+        )
+
+    def _drowsy_seat_ids(self) -> tuple[int, ...]:
+        return tuple(
+            sorted(
+                seat_id
+                for seat_id, row in self._seat_rows.items()
+                if row.detection_state.detection is not None
+                and row.detection_state.detection.alert
+            )
+        )
+
+    def _publish_seat(
+        self,
+        seat_id: int,
+        previous_drowsy: tuple[int, ...],
+        *,
+        sensor_driven: bool,
+    ) -> None:
+        if self._status_publisher is None:
+            return
+        current_drowsy = self._drowsy_seat_ids()
+        alert_changed = previous_drowsy != current_drowsy
+        publish_student = alert_changed or not sensor_driven
+        if sensor_driven and not alert_changed:
+            now = self._timer.now()
+            last_published = self._last_sensor_publish_at.get(seat_id)
+            due = (
+                last_published is None
+                or now - last_published >= SENSOR_STATUS_INTERVAL_SECONDS
+            )
+            publish_student = due
+            if due:
+                self._last_sensor_publish_at[seat_id] = now
+        elif sensor_driven:
+            self._last_sensor_publish_at[seat_id] = self._timer.now()
+        student_status = None
+        if publish_student:
+            student_status = self._build_student_status(seat_id)
+        lecturer_seats = None
+        if alert_changed:
+            lecturer_seats = current_drowsy
+        if student_status is None and lecturer_seats is None:
+            return
+        update = SeatStatusUpdate(student=student_status, drowsy_seats=lecturer_seats)
+        self._status_publisher.publish(update)
+
+    def _build_student_status(self, seat_id: int) -> StudentSeatStatus:
+        row = self._seat_rows[seat_id]
+        detection = row.detection_state.detection
+        drowsy = detection is not None and detection.alert
+        return StudentSeatStatus(seat_id=seat_id, drowsy=drowsy)
 
     def _take_fresh_batch(self) -> tuple[QueuedFrame, ...]:
         now = self._timer.now()

@@ -5,6 +5,8 @@ import time
 
 import aiomqtt
 
+from modules.processing.mqtt_topics import build_student_data_topic
+
 
 def parse_arguments() -> argparse.Namespace:
     argument_parser = argparse.ArgumentParser(
@@ -34,7 +36,7 @@ def parse_arguments() -> argparse.Namespace:
 
 
 async def publish_test_reading(arguments: argparse.Namespace) -> None:
-    topic = f"drowsy/student{arguments.student}/data"
+    topic = build_student_data_topic(arguments.student)
     async with aiomqtt.Client(
         hostname=arguments.host,
         port=arguments.port,
