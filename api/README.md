@@ -69,12 +69,12 @@ Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local acc
 in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
 The API subscribes to `drowsy/+/data` and `wakey/+/sensors`; topics named
 `drowsy/student<N>/data` or `wakey/student<N>/sensors` map readings to seat N.
-Messages are UTF-8 JSON with `fsr` (0–4095), `tof` (millimeters; `-1` means
-no valid ToF reading), and `present` (0 or 1).
-The API timestamps each message when it receives it. Fresh readings are
-included with that seat's camera detections.
-`present: 0` or an FSR value of zero marks the seat unoccupied; ToF is reported
-but does not affect classification. Set `DROWSINESS_MQTT_ENABLED=false` to disable
+Messages are UTF-8 JSON with `drowsy` and `present` encoded as `0` or `1`. The
+API timestamps each message when it receives it and attaches fresh results to
+that seat's camera detections. The ESP32 determines sensor drowsiness: when it
+reports drowsy, the combined sample is drowsy if the camera agrees or detects
+no face; a camera result showing an awake face overrides it. Unoccupied or
+stale sensor results do not count. Set `DROWSINESS_MQTT_ENABLED=false` to disable
 MQTT input and output, or override `DROWSINESS_MQTT_HOST` and
 `DROWSINESS_MQTT_PORT`. The subscriber and result publisher retry when the broker
 is unavailable. When the drowsiness alert turns on, the API publishes

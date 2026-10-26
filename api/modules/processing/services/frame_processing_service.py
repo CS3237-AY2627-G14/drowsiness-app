@@ -178,8 +178,7 @@ class FrameProcessingService:
                 sensor_measurements = sensor_entry[0]
                 measurements = measurements.model_copy(
                     update={
-                        "fsr_raw": sensor_measurements.fsr_raw,
-                        "tof_distance_mm": sensor_measurements.tof_distance_mm,
+                        "sensor_drowsy": sensor_measurements.drowsy,
                         "present": sensor_measurements.present,
                     }
                 )

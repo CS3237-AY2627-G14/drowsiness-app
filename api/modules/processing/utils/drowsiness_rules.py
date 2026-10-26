@@ -7,6 +7,8 @@ from modules.processing.schemas import (
     MinuteSummary,
 )
 
+ALERT_MIN_VALID_SAMPLES = 10
+
 
 def calculate_mean_ear(measurements: FrameMeasurements) -> float | None:
     left_ear = measurements.left_ear
@@ -15,16 +17,22 @@ def calculate_mean_ear(measurements: FrameMeasurements) -> float | None:
         return None
     return (left_ear + right_ear) / 2
 
+
 # if camera classifies drowsy check TOF OR FSR thresholds to double check if drowsy
 def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool | None:
-    if measurements.present is False or measurements.fsr_raw == 0:
+    if measurements.present is False:
         return None
+    if measurements.sensor_drowsy is None:
+        return None
+    if not measurements.sensor_drowsy:
+        return False
+
     left_ear = measurements.left_ear
     right_ear = measurements.right_ear
     probability = measurements.fatigue_probability
     has_eye_measurements = left_ear is not None and right_ear is not None
     if not has_eye_measurements and probability is None:
-        return None
+        return True
     are_eyes_closed = (
         left_ear is not None
         and right_ear is not None
@@ -33,15 +41,7 @@ def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool 
     has_fatigue_prediction = (
         probability is not None and probability >= settings.fatigue_threshold
     )
-    camera_classifies_drowsy = are_eyes_closed or has_fatigue_prediction
-    if not camera_classifies_drowsy:
-        return False
-    if measurements.fsr_raw is None or measurements.tof_distance_mm is None:
-        return None
-    return (
-        measurements.fsr_raw > settings.fsr_threshold
-        or measurements.tof_distance_mm > settings.tof_threshold_mm
-    )
+    return are_eyes_closed or has_fatigue_prediction
 
 
 def update_detection_window(
@@ -70,7 +70,8 @@ def build_minute_summary(samples: tuple[DetectionSample, ...]) -> MinuteSummary:
 
 def should_raise_alert(minute: MinuteSummary) -> bool:
     return (
-        minute.valid_samples >= 30 and minute.drowsy_samples * 2 >= minute.valid_samples
+        minute.valid_samples >= ALERT_MIN_VALID_SAMPLES
+        and minute.drowsy_samples * 2 >= minute.valid_samples
     )
 
 
@@ -91,8 +92,7 @@ def evaluate_measurements(
         captured_at_ms=measurements.captured_at_ms,
         ear=mean_ear,
         fatigue_probability=measurements.fatigue_probability,
-        fsr_raw=measurements.fsr_raw,
-        tof_distance_mm=measurements.tof_distance_mm,
+        sensor_drowsy=measurements.sensor_drowsy,
         present=measurements.present,
         minute=minute,
         processing_ms=measurements.processing_ms,

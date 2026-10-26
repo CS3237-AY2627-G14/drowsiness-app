@@ -64,19 +64,19 @@ Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local acc
 State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
 The API subscribes to `drowsy/+/data` and the firmware topic
 `wakey/+/sensors`; `student<N>` maps to seat N. Messages are UTF-8 JSON with
-`fsr` (raw ADC value, 0–4095), `tof` (distance in millimeters; `-1` means no
-valid ToF reading), and `present` (0 or 1). The API timestamps each message
-when it receives it:
+`drowsy` and `present` encoded as `0` or `1`. The ESP32 determines the sensor
+drowsiness result; the API combines it with the camera result and timestamps
+each message when received:
 
 ```json
-{"fsr": 530, "tof": 129, "present": 0}
+{"drowsy": 1, "present": 1}
 ```
 
-The latest sensor reading is attached to that seat's camera detection when it
-is no more than five seconds old. `present: 0` or an FSR value of zero marks the
-seat unoccupied, so that camera sample is not counted as awake or drowsy. ToF
-is included in the live status for monitoring but does not affect classification
-until a calibrated drowsiness threshold is defined. Set
+The latest sensor result is attached to that seat's camera detection when it
+is no more than five seconds old. A sample for an unoccupied seat or without a
+fresh sensor result is not counted. If the ESP32 reports drowsiness, the sample
+counts as drowsy when the camera also detects drowsiness or detects no face; a
+camera result showing an awake face overrides the ESP32 result. Set
 `DROWSINESS_MQTT_ENABLED=false` to disable MQTT input and output, or override
 `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT` to use another broker.
 The subscriber and result publisher retry if the broker is unavailable. When
@@ -93,14 +93,14 @@ cd api
 uv run python tests/test_publish_mqtt_test_data.py
 ```
 
-The script publishes ten fresh readings (one per second) with `fsr=1234` and
-`tof=420` to `drowsy/student1/data`. Check that the values appear in the live
-detection status. Change the node, values, count, or interval with its options.
-To test an unoccupied seat or another node:
+The script publishes ten fresh test results (one per second) to
+`wakey/student1/sensors`. Check the ESP32 result and the combined camera
+classification in live detection status. Change the node, drowsy/present flags,
+count, or interval with its options. For example, test an unoccupied seat:
 
 ```bash
 cd api
-uv run python scripts/publish_mqtt_test_data.py --student 2 --fsr 0 --tof-mm 420
+uv run python tests/test_publish_mqtt_test_data.py --student 2 --drowsy 0 --present 0
 ```
 
 ## Checks
