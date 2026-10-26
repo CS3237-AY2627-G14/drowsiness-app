@@ -38,7 +38,7 @@ class FrameMeasurements(BaseModel):
 class SensorMeasurements(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     fsr_raw: int
-    tof_distance_mm: int
+    tof_distance_mm: int | None
     captured_at_ms: float
     present: bool | None = None
 
@@ -105,3 +105,4 @@ class ProcessingStatus(BaseModel):
     pending_frames: int
     in_flight: bool
     detection: DrowsinessResult | None
+    mqtt_alert_sent_recently: bool = False

@@ -46,6 +46,7 @@ class StreamStatus(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     diagnostics: StreamDiagnostics
     detection: DrowsinessResult | None
+    mqtt_alert_sent_recently: bool = False
 
 
 class DetectionSnapshot(BaseModel):
@@ -66,6 +67,7 @@ class StreamResponse(BaseModel):
     type: Literal["status"] = "status"
     detection: DetectionSnapshot | None
     diagnostics: StreamDiagnostics | None = None
+    mqtt_alert_sent_recently: bool = False
 
 
 class SocketConnection(BaseModel):

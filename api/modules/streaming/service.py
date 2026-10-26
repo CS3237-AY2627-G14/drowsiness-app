@@ -145,7 +145,9 @@ class StreamingService:
         )
         self._streaming_registry.save(connection_id, sampled_record)
         return StreamStatus(
-            diagnostics=diagnostics, detection=processing_status.detection
+            diagnostics=diagnostics,
+            detection=processing_status.detection,
+            mqtt_alert_sent_recently=processing_status.mqtt_alert_sent_recently,
         )
 
     async def close_stream(self, connection_id: UUID) -> None:

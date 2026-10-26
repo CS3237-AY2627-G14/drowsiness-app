@@ -59,8 +59,10 @@ record), and a connection (one publishing connection).
    processing state is opened. Any failure rolls back all of it.
 2. **Stream.** Frames are admitted and passed to processing, and detection status
    is reported to the client.
-   MQTT readings on `drowsy/student<N>/data` are mapped to seat N and attached
-   to that seat's camera results while the reading is fresh.
+   MQTT readings on `drowsy/student<N>/data` or `wakey/student<N>/sensors` are
+   mapped to seat N and attached to that seat's camera results while the reading
+   is fresh. When a drowsiness alert turns on, processing queues the seat
+   identifier for MQTT publication.
 3. **Monitor.** Each connection is checked for session expiry, processing health
    and idleness. Status reporting can be removed without affecting monitoring.
 4. **Disconnect.** Seat ownership is released, connection state is discarded, and

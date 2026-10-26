@@ -30,7 +30,10 @@ export type PublishControlsProps = {
   onStop: () => void
 }
 
-export type DetectionStatusProps = { detection: DetectionResult | null }
+export type DetectionStatusProps = {
+  detection: DetectionResult | null
+  mqttAlertSentRecently: boolean
+}
 
 export type ConnectionStatusProps = { phase: StreamingPhase }
 

@@ -38,7 +38,8 @@ Open http://localhost:3000/streaming. Select a seat, start the camera, then Publ
 The API runs at http://localhost:8000; health is at `/health` and API docs at
 `/docs`. Stop the app terminals with Ctrl+C and the broker with
 `docker compose down` from `api/`.
-MQTT application integration is not implemented yet; camera uploads use Socket.IO.
+MQTT carries sensor input and drowsiness alert notifications; camera uploads use
+Socket.IO.
 
 ## Configuration
 
@@ -61,10 +62,11 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access.
 State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-The API subscribes to `drowsy/+/data`; `drowsy/student<N>/data` maps to seat N.
-Each message must be UTF-8 JSON with `fsr` (raw ADC value, 0–4095), `tof`
-(positive distance in millimeters), and `present` (0 or 1). The API timestamps
-each message when it receives it:
+The API subscribes to `drowsy/+/data` and the firmware topic
+`wakey/+/sensors`; `student<N>` maps to seat N. Messages are UTF-8 JSON with
+`fsr` (raw ADC value, 0–4095), `tof` (distance in millimeters; `-1` means no
+valid ToF reading), and `present` (0 or 1). The API timestamps each message
+when it receives it:
 
 ```json
 {"fsr": 530, "tof": 129, "present": 0}
@@ -75,10 +77,13 @@ is no more than five seconds old. `present: 0` or an FSR value of zero marks the
 seat unoccupied, so that camera sample is not counted as awake or drowsy. ToF
 is included in the live status for monitoring but does not affect classification
 until a calibrated drowsiness threshold is defined. Set
-`DROWSINESS_MQTT_ENABLED=false` to disable the subscriber, or override
+`DROWSINESS_MQTT_ENABLED=false` to disable MQTT input and output, or override
 `DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT` to use another broker.
-The subscriber retries if the broker is unavailable. Camera uploads continue
-to use Socket.IO at `/api/socket.io` through Vite's API proxy.
+The subscriber and result publisher retry if the broker is unavailable. When
+the drowsiness alert turns on, the API publishes `{"id": "A1"}` to
+`drowsy/result` at QoS 1. Seat identifiers are hardcoded for now; `B1` will be
+added later. Camera uploads continue to use Socket.IO at `/api/socket.io`
+through Vite's API proxy.
 
 To send a test reading to the local broker while the API and frontend are
 running, start a camera stream for seat 1 and run this from `api/`:

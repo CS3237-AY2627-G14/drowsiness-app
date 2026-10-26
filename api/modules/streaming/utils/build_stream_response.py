@@ -23,4 +23,5 @@ def build_stream_response(status: StreamStatus, diagnostics: bool) -> StreamResp
     return StreamResponse(
         detection=detection,
         diagnostics=status.diagnostics if diagnostics else None,
+        mqtt_alert_sent_recently=status.mqtt_alert_sent_recently,
     )

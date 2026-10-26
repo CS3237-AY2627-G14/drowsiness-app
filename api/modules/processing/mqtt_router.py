@@ -11,13 +11,15 @@ from core.config import Settings
 from modules.processing.facade import ProcessingFacade, SensorMeasurements
 
 logger = logging.getLogger(__name__)
-SENSOR_TOPIC_PATTERN = re.compile(r"drowsy/student([1-9]\d*)/data")
+SENSOR_TOPIC_PATTERN = re.compile(
+    r"(?:drowsy/student([1-9]\d*)/data|wakey/student([1-9]\d*)/sensors)"
+)
 
 
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    fsr: int = Field(ge=0, le=4095)
-    tof: int = Field(gt=0)
+    fsr: int = Field(ge=0, le=4096)
+    tof: int = Field(ge=-1)
     present: int = Field(ge=0, le=1)
 
 
@@ -57,6 +59,7 @@ class SensorMqttRouter:
                     port=self._settings.mqtt_port,
                 ) as mqtt_client:
                     await mqtt_client.subscribe("drowsy/+/data")
+                    await mqtt_client.subscribe("wakey/+/sensors")
                     async for message in mqtt_client.messages:
                         await self._handle_message(message.topic.value, message.payload)
             except aiomqtt.MqttError as error:
@@ -73,7 +76,7 @@ class SensorMqttRouter:
         if topic_match is None:
             logger.warning("Ignoring MQTT message on unsupported topic")
             return
-        seat_id = int(topic_match.group(1))
+        seat_id = int(topic_match.group(1) or topic_match.group(2))
         if seat_id > self._settings.demo_seat_count:
             logger.warning(
                 "Ignoring MQTT message for unknown student seat_id=%d", seat_id
@@ -103,7 +106,7 @@ class SensorMqttRouter:
             return
         measurements = SensorMeasurements(
             fsr_raw=sensor_payload.fsr,
-            tof_distance_mm=sensor_payload.tof,
+            tof_distance_mm=(sensor_payload.tof if sensor_payload.tof > 0 else None),
             captured_at_ms=time.time_ns() / 1_000_000,
             present=sensor_payload.present == 1,
         )

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from uuid import UUID
 
 from core.clock import MonotonicTimer, Timer
@@ -7,6 +8,7 @@ from core.config import Settings
 from modules.processing.exceptions import ProcessingException
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.inference.frame_predictor import FramePredictor
+from modules.processing.mqtt_result_publisher import MqttResultPublisherPort
 from modules.processing.repositories.registry import ProcessingRegistry
 from modules.processing.schemas import (
     FrameInput,
@@ -31,12 +33,14 @@ class FrameProcessingService:
         frame_predictor: FramePredictor,
         settings: Settings,
         timer: Timer | None = None,
+        mqtt_result_publisher: MqttResultPublisherPort | None = None,
     ) -> None:
         self._processing_registry = processing_registry
         self._frame_buffer = frame_buffer
         self._frame_predictor = frame_predictor
         self._settings = settings
         self._timer = timer if timer is not None else MonotonicTimer()
+        self._mqtt_result_publisher = mqtt_result_publisher
         self._available = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
         self._failed = False
@@ -117,6 +121,12 @@ class FrameProcessingService:
 
     async def get_status(self, connection_id: UUID) -> ProcessingStatus:
         record = self._get_active_record(connection_id)
+        mqtt_alert_publisher = self._mqtt_result_publisher
+        last_published_at_ms = (
+            mqtt_alert_publisher.last_published_at_ms
+            if mqtt_alert_publisher is not None
+            else None
+        )
         return ProcessingStatus(
             processed_frames=record.processed_frames,
             replaced_frames=record.replaced_frames,
@@ -124,6 +134,8 @@ class FrameProcessingService:
             pending_frames=self._frame_buffer.pending_count(connection_id),
             in_flight=self._frame_buffer.is_in_flight(connection_id),
             detection=record.detection_state.detection,
+            mqtt_alert_sent_recently=last_published_at_ms is not None
+            and time.time_ns() / 1_000_000 - last_published_at_ms < 10_000,
         )
 
     async def close_connection(self, connection_id: UUID) -> None:
@@ -149,6 +161,7 @@ class FrameProcessingService:
         record = self._processing_registry.get(measurements.connection_id)
         if record is None:
             return
+        alert_started = False
         if measurements.error:
             updated_record = record.model_copy(update={"error": measurements.error})
         else:
@@ -173,6 +186,13 @@ class FrameProcessingService:
             detection_state = evaluate_measurements(
                 record.detection_state, measurements, self._settings
             )
+            previous_detection = record.detection_state.detection
+            detection = detection_state.detection
+            alert_started = (
+                detection is not None
+                and detection.alert
+                and (previous_detection is None or not previous_detection.alert)
+            )
             updated_record = record.model_copy(
                 update={
                     "detection_state": detection_state,
@@ -180,6 +200,8 @@ class FrameProcessingService:
                 }
             )
         self._processing_registry.save(measurements.connection_id, updated_record)
+        if alert_started and self._mqtt_result_publisher is not None:
+            self._mqtt_result_publisher.enqueue_alert()
 
     def _take_fresh_batch(self) -> tuple[QueuedFrame, ...]:
         now = self._timer.now()
