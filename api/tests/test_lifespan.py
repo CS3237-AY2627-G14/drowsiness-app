@@ -7,6 +7,7 @@ import pytest
 from core.config import Settings
 from main import create_app
 from modules.processing.inference import InferenceRuntime
+from modules.processing.mqtt_result_publisher import MqttResultPublisher
 from modules.processing.mqtt_router import SensorMqttRouter
 from modules.processing.services.frame_processing_service import FrameProcessingService
 from modules.streaming.router import StreamingSocketRouter
@@ -39,6 +40,12 @@ class RecordingLifecycle:
     def start_mqtt(self) -> None:
         self.record("mqtt.start")
 
+    def start_result_publisher(self) -> None:
+        self.record("results.start")
+
+    async def stop_result_publisher(self) -> None:
+        self.record("results.stop")
+
     async def stop_mqtt(self) -> None:
         self.record("mqtt.stop")
 
@@ -55,10 +62,12 @@ class RecordingLifecycle:
         None,
         "processing.start",
         "mqtt.start",
+        "results.start",
         "running",
         "mqtt.stop",
         "streaming.stop",
         "processing.stop",
+        "results.stop",
     ],
 )
 def test_lifespan_attempts_all_cleanup_in_order(
@@ -70,6 +79,8 @@ def test_lifespan_attempts_all_cleanup_in_order(
     monkeypatch.setattr(SensorMqttRouter, "start", lifecycle.start_mqtt)
     monkeypatch.setattr(SensorMqttRouter, "stop", lifecycle.stop_mqtt)
     monkeypatch.setattr(StreamingSocketRouter, "stop", lifecycle.stop_streaming)
+    monkeypatch.setattr(MqttResultPublisher, "start", lifecycle.start_result_publisher)
+    monkeypatch.setattr(MqttResultPublisher, "stop", lifecycle.stop_result_publisher)
     settings = Settings(mqtt_enabled=False)
     application = create_app(
         settings, inference_factory=lifecycle.create_inference_runtime
@@ -89,11 +100,14 @@ def test_lifespan_attempts_all_cleanup_in_order(
     if failure != "processing.start":
         startup_events.append("mqtt.start")
     if failure not in {"processing.start", "mqtt.start"}:
+        startup_events.append("results.start")
+    if failure not in {"processing.start", "mqtt.start", "results.start"}:
         startup_events.append("running")
     assert lifecycle.events == [
         *startup_events,
         "mqtt.stop",
         "streaming.stop",
         "processing.stop",
+        "results.stop",
         "inference.stop",
     ]

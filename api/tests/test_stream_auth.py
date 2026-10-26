@@ -81,7 +81,8 @@ def test_socketio_authentication_and_status(client: TestClient) -> None:
         frame_payload = FRAME_HEADER.pack(1, 100.0) + b"test"
         socket.send_frame(frame_payload)
         status = socket.receive()
-        assert set(status) == {"type", "detection"}
+        assert set(status) == {"type", "detection", "mqtt_alert_sent_recently"}
+        assert status["mqtt_alert_sent_recently"] is False
         assert status["detection"]["minute"] == {
             "valid_samples": 1,
             "drowsy_samples": 0,
@@ -93,6 +94,7 @@ def test_socketio_authentication_and_status(client: TestClient) -> None:
         assert "processing_ms" not in status["detection"]
         assert "fatigue_seconds" not in status["detection"]
         assert status["detection"]["fatigue_probability"] == 0.1
+        assert status["detection"]["present"] is None
 
 
 def test_diagnostics_are_explicitly_requested(client: TestClient) -> None:
@@ -102,7 +104,13 @@ def test_diagnostics_are_explicitly_requested(client: TestClient) -> None:
         frame_payload = FRAME_HEADER.pack(1, 100.0) + b"test"
         socket.send_frame(frame_payload)
         status = socket.receive()
-        assert set(status) == {"type", "detection", "diagnostics"}
+        assert set(status) == {
+            "type",
+            "detection",
+            "diagnostics",
+            "mqtt_alert_sent_recently",
+        }
+        assert status["mqtt_alert_sent_recently"] is False
         assert status["diagnostics"]["received_frames"] == 1
         assert status["diagnostics"]["processed_frames"] == 1
 

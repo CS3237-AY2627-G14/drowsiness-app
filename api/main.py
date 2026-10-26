@@ -21,6 +21,7 @@ from modules.classrooms.service import ClassroomsService
 from modules.processing.facade import ProcessingFacade
 from modules.processing.inference import InferenceRuntime, create_inference_runtime
 from modules.processing.inference.frame_buffer import FrameBuffer
+from modules.processing.mqtt_result_publisher import MqttResultPublisher
 from modules.processing.mqtt_router import SensorMqttRouter
 from modules.processing.publishing import QueueSeatStatusPublisher, SeatStatusUpdate
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
@@ -85,6 +86,7 @@ def build_streaming(
     sessions_facade: SessionsFacade,
     inference_runtime: InferenceRuntime,
     status_publisher: QueueSeatStatusPublisher | None = None,
+    mqtt_result_publisher: MqttResultPublisher | None = None,
 ) -> tuple[StreamingSocketRouter, FrameProcessingService, ProcessingFacade]:
     processing_registry = InMemoryProcessingRegistry()
     frame_buffer = FrameBuffer()
@@ -94,6 +96,7 @@ def build_streaming(
         inference_runtime.frame_predictor,
         configuration,
         status_publisher=status_publisher,
+        mqtt_result_publisher=mqtt_result_publisher,
     )
     processing_facade = ProcessingFacade(frame_processing_service)
     streaming_registry = InMemoryStreamingRegistry()
@@ -141,6 +144,7 @@ def create_app(
             else None
         )
         async with inference_factory(configuration) as inference_runtime:
+            mqtt_result_publisher = MqttResultPublisher(configuration)
             (
                 streaming_socket_router,
                 frame_processing_service,
@@ -151,16 +155,19 @@ def create_app(
                 sessions_facade,
                 inference_runtime,
                 status_publisher,
+                mqtt_result_publisher,
             )
             sensor_mqtt_router = SensorMqttRouter(
                 configuration, processing_facade, status_updates
             )
             async with AsyncExitStack() as shutdown_stack:
+                shutdown_stack.push_async_callback(mqtt_result_publisher.stop)
                 shutdown_stack.push_async_callback(frame_processing_service.stop)
                 shutdown_stack.push_async_callback(streaming_socket_router.stop)
                 shutdown_stack.push_async_callback(sensor_mqtt_router.stop)
                 frame_processing_service.start(inference_runtime.workers)
                 sensor_mqtt_router.start()
+                mqtt_result_publisher.start()
                 yield
 
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)

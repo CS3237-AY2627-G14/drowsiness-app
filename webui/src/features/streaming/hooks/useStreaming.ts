@@ -98,6 +98,7 @@ export const useStreaming = () => {
       ? { ...stream.status.diagnostics, resultAgeMs: stream.status.resultAgeMs }
       : null,
     detection: stream.status?.detection ?? null,
+    mqttAlertSentRecently: stream.status?.mqtt_alert_sent_recently ?? false,
     hasPreview: camera.isOpen,
     canStartCamera,
     canPublish,

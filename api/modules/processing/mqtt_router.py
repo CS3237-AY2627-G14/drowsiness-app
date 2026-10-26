@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 
 import aiomqtt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -8,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from core.config import Settings
 from modules.processing.facade import ProcessingFacade, SensorMeasurements
 from modules.processing.mqtt_topics import (
-    build_student_data_subscription,
+    STUDENT_DATA_SUBSCRIPTIONS,
     parse_seat_id,
 )
 from modules.processing.publishing import SeatStatusUpdate, build_mqtt_publications
@@ -19,9 +20,9 @@ logger = logging.getLogger(__name__)
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    fsr: int = Field(ge=0, le=4095)
-    tof_mm: int = Field(gt=0)
-    timestamp_ms: float = Field(gt=0)
+    fsr: int = Field(ge=0, le=4096)
+    tof: int = Field(ge=-1)
+    present: int = Field(ge=0, le=1)
 
 
 class SensorMqttRouter:
@@ -65,8 +66,8 @@ class SensorMqttRouter:
                     hostname=self._settings.mqtt_host,
                     port=self._settings.mqtt_port,
                 ) as mqtt_client:
-                    subscription = build_student_data_subscription()
-                    await mqtt_client.subscribe(subscription)
+                    for subscription in STUDENT_DATA_SUBSCRIPTIONS:
+                        await mqtt_client.subscribe(subscription)
                     async with asyncio.TaskGroup() as task_group:
                         task_group.create_task(self._receive_messages(mqtt_client))
                         task_group.create_task(self._publish_updates(mqtt_client))
@@ -115,12 +116,22 @@ class SensorMqttRouter:
             return
         try:
             sensor_payload = MqttSensorPayload.model_validate(payload_data)
-        except ValidationError:
-            logger.warning("Ignoring invalid MQTT sensor fields seat_id=%d", seat_id)
+        except ValidationError as error:
+            field_errors = "; ".join(
+                f"{'.'.join(str(part) for part in detail['loc']) or 'payload'}: "
+                f"{detail['type']}"
+                for detail in error.errors()
+            )
+            logger.warning(
+                "Ignoring invalid MQTT sensor fields seat_id=%d: %s",
+                seat_id,
+                field_errors,
+            )
             return
         measurements = SensorMeasurements(
             fsr_raw=sensor_payload.fsr,
-            tof_distance_mm=sensor_payload.tof_mm,
-            captured_at_ms=sensor_payload.timestamp_ms,
+            tof_distance_mm=(sensor_payload.tof if sensor_payload.tof > 0 else None),
+            captured_at_ms=time.time_ns() / 1_000_000,
+            present=sensor_payload.present == 1,
         )
         await self._processing_facade.submit_sensor_measurements(seat_id, measurements)

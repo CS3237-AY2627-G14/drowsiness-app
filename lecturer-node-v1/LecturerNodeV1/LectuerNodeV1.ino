@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
@@ -83,7 +84,7 @@ void loop() {
       lcd.backlight();  
       lcd.clear();                 // Replace lcd with your LCD object's name
       lcd.setCursor(0, 0);
-      lcd.print("Student Drowsy");
+      lcd.print("Seat Number:");
       lcd.setCursor(0, 1);
       lcd.print(idToDisplay);
 
@@ -113,18 +114,24 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
     {
         mqttClient.subscribe(subscribeTopic, [](const std::string &payload)
         {
-            if (payload.length() != 9)
+            StaticJsonDocument<128> doc;
+            DeserializationError error = deserializeJson(doc, payload.c_str());
+
+            if (error)
             {
-                log_i("Ignoring ID with invalid length: %s", payload.c_str());
+                log_i("Invalid JSON: %s", error.c_str());
                 return;
             }
 
-            char receivedId[10];
-            memcpy(receivedId, payload.c_str(), 9);
-            receivedId[9] = '\0';
+            const char *id = doc["id"];
+            if (id == nullptr || strlen(id) <= 5)
+            {
+                log_i("JSON does not accept char more than 5");
+                return;
+            }
 
             portENTER_CRITICAL(&idMux);
-            memcpy(pendingId, receivedId, sizeof(pendingId));
+            memcpy(pendingId, id, sizeof(pendingId)); // pendingId must be char[10]
             alarmRequested = true;
             portEXIT_CRITICAL(&idMux);
         });

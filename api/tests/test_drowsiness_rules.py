@@ -13,6 +13,8 @@ def observe(
     left: float | None = 0.3,
     right: float | None = 0.3,
     probability: float | None = 0.1,
+    fsr_raw: int | None = 51,
+    tof_distance_mm: int | None = 2000,
 ) -> DetectionState:
     measurements = FrameMeasurements(
         connection_id=uuid4(),
@@ -21,6 +23,8 @@ def observe(
         left_ear=left,
         right_ear=right,
         fatigue_probability=probability,
+        fsr_raw=fsr_raw,
+        tof_distance_mm=tof_distance_mm,
     )
     settings = Settings()
     return evaluate_measurements(record, measurements, settings)
@@ -149,6 +153,7 @@ def test_unoccupied_sensor_sample_is_unknown_and_exposes_sensor_readings() -> No
         fatigue_probability=0.9,
         fsr_raw=0,
         tof_distance_mm=420,
+        present=False,
     )
 
     result = evaluate_measurements(DetectionState(), measurement, Settings())
@@ -158,25 +163,46 @@ def test_unoccupied_sensor_sample_is_unknown_and_exposes_sensor_readings() -> No
     assert result.detection.minute.drowsy_samples == 0
     assert result.detection.fsr_raw == 0
     assert result.detection.tof_distance_mm == 420
+    assert result.detection.present is False
 
 
-@pytest.mark.parametrize("tof_distance_mm", [1, 420, 4000])
-def test_tof_distance_does_not_change_camera_classification(
-    tof_distance_mm: int,
+@pytest.mark.parametrize(
+    (
+        "fsr_raw",
+        "tof_distance_mm",
+        "camera_drowsy",
+        "expected_valid_samples",
+        "expected_drowsy",
+    ),
+    [
+        (51, 2000, True, 1, 1),
+        (50, 2001, True, 1, 1),
+        (50, 2000, True, 1, 0),
+        (51, 2001, False, 1, 0),
+        (None, 2001, True, 0, 0),
+        (51, None, True, 0, 0),
+    ],
+)
+def test_sensor_thresholds_confirm_camera_drowsiness(
+    fsr_raw: int | None,
+    tof_distance_mm: int | None,
+    camera_drowsy: bool,
+    expected_valid_samples: int,
+    expected_drowsy: int,
 ) -> None:
     measurement = FrameMeasurements(
         connection_id=uuid4(),
         frame_id=1,
         captured_at_ms=1000.0,
-        left_ear=0.3,
-        right_ear=0.3,
-        fatigue_probability=0.1,
-        fsr_raw=1234,
+        left_ear=0.1 if camera_drowsy else 0.3,
+        right_ear=0.1 if camera_drowsy else 0.3,
+        fatigue_probability=0.9 if camera_drowsy else 0.1,
+        fsr_raw=fsr_raw,
         tof_distance_mm=tof_distance_mm,
     )
 
     result = evaluate_measurements(DetectionState(), measurement, Settings())
 
     assert result.detection is not None
-    assert result.detection.minute.valid_samples == 1
-    assert result.detection.minute.drowsy_samples == 0
+    assert result.detection.minute.valid_samples == expected_valid_samples
+    assert result.detection.minute.drowsy_samples == expected_drowsy

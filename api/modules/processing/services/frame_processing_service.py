@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -9,6 +10,7 @@ from core.config import Settings
 from modules.processing.exceptions import ProcessingException
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.inference.frame_predictor import FramePredictor
+from modules.processing.mqtt_result_publisher import MqttResultPublisherPort
 from modules.processing.publishing import (
     SeatStatusPublisher,
     SeatStatusUpdate,
@@ -40,6 +42,7 @@ class SeatRow(BaseModel):
 
     fsr_raw: int | None = None
     tof_distance_mm: int | None = None
+    present: bool | None = None
     captured_at_ms: float | None = None
     received_at: float | None = None
     latest_camera: FrameMeasurements | None = None
@@ -57,6 +60,7 @@ class FrameProcessingService:
         settings: Settings,
         timer: Timer | None = None,
         status_publisher: SeatStatusPublisher | None = None,
+        mqtt_result_publisher: MqttResultPublisherPort | None = None,
     ) -> None:
         self._processing_registry = processing_registry
         self._frame_buffer = frame_buffer
@@ -64,6 +68,7 @@ class FrameProcessingService:
         self._settings = settings
         self._timer = timer if timer is not None else MonotonicTimer()
         self._status_publisher = status_publisher
+        self._mqtt_result_publisher = mqtt_result_publisher
         self._available = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
         self._failed = False
@@ -124,6 +129,7 @@ class FrameProcessingService:
         updated_row = self._update_sensor_row(row, measurements, received_at)
         self._seat_rows[seat_id] = updated_row
         self._save_connection_detection(seat_id, updated_row.detection_state)
+        self._enqueue_started_alert(row.detection_state, updated_row.detection_state)
         self._publish_seat(seat_id, previous_drowsy, sensor_driven=True)
 
     def _update_sensor_row(
@@ -136,6 +142,7 @@ class FrameProcessingService:
                 update={
                     "fsr_raw": measurements.fsr_raw,
                     "tof_distance_mm": measurements.tof_distance_mm,
+                    "present": measurements.present,
                 }
             )
             detection_state = reclassify_latest_sample(
@@ -145,6 +152,7 @@ class FrameProcessingService:
             update={
                 "fsr_raw": measurements.fsr_raw,
                 "tof_distance_mm": measurements.tof_distance_mm,
+                "present": measurements.present,
                 "captured_at_ms": measurements.captured_at_ms,
                 "received_at": received_at,
                 "detection_state": detection_state,
@@ -178,6 +186,12 @@ class FrameProcessingService:
 
     async def get_status(self, connection_id: UUID) -> ProcessingStatus:
         record = self._get_active_record(connection_id)
+        mqtt_alert_publisher = self._mqtt_result_publisher
+        last_published_at_ms = (
+            mqtt_alert_publisher.last_published_at_ms
+            if mqtt_alert_publisher is not None
+            else None
+        )
         return ProcessingStatus(
             processed_frames=record.processed_frames,
             replaced_frames=record.replaced_frames,
@@ -185,6 +199,8 @@ class FrameProcessingService:
             pending_frames=self._frame_buffer.pending_count(connection_id),
             in_flight=self._frame_buffer.is_in_flight(connection_id),
             detection=record.detection_state.detection,
+            mqtt_alert_sent_recently=last_published_at_ms is not None
+            and time.time_ns() / 1_000_000 - last_published_at_ms < 10_000,
         )
 
     async def close_connection(self, connection_id: UUID) -> None:
@@ -242,8 +258,23 @@ class FrameProcessingService:
             }
         )
         self._processing_registry.save(measurements.connection_id, updated_record)
+        self._enqueue_started_alert(record.detection_state, detection_state)
         if seat_id is not None:
             self._publish_seat(seat_id, previous_drowsy, sensor_driven=False)
+
+    def _enqueue_started_alert(
+        self, previous_state: DetectionState, current_state: DetectionState
+    ) -> None:
+        if self._mqtt_result_publisher is None:
+            return
+        previous_detection = previous_state.detection
+        detection = current_state.detection
+        if (
+            detection is not None
+            and detection.alert
+            and (previous_detection is None or not previous_detection.alert)
+        ):
+            self._mqtt_result_publisher.enqueue_alert()
 
     def _update_seat_detection(
         self, seat_id: int, measurements: FrameMeasurements
@@ -267,12 +298,13 @@ class FrameProcessingService:
         self, row: SeatRow, measurements: FrameMeasurements
     ) -> FrameMeasurements:
         fsr_raw, tof_distance_mm = self._get_fresh_sensor_values(row)
-        if fsr_raw is None or tof_distance_mm is None:
+        if fsr_raw is None:
             return measurements
         return measurements.model_copy(
             update={
                 "fsr_raw": fsr_raw,
                 "tof_distance_mm": tof_distance_mm,
+                "present": row.present,
             }
         )
 
@@ -280,7 +312,6 @@ class FrameProcessingService:
         if (
             row.received_at is None
             or row.fsr_raw is None
-            or row.tof_distance_mm is None
             or self._timer.now() - row.received_at
             > self._settings.mqtt_sensor_max_age_seconds
         ):

@@ -65,21 +65,28 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto listens on port `1883` of the Docker host with anonymous local access,
-so classroom nodes on the same network can connect. State is in memory and lost
-on restart. Use `docker compose logs -f mqtt` for logs. The API subscribes to
-`drowsy/stud/+/data`; `drowsy/stud/<seat_id>/data` maps to that seat. Messages
-are UTF-8 JSON with `fsr` (0–4095), `tof_mm` (positive millimeters), and
-`timestamp_ms` (Unix epoch milliseconds). Each seat keeps an in-memory row.
-Fresh readings are included with that seat's camera samples. An FSR value of
-zero marks the latest sample unoccupied; ToF does not affect
-classification. The API publishes `{"drowsy": true}` or `{"drowsy": false}` to
-`drowsy/stud/<seat_id>/result` and, when the drowsy set changes, a retained
-`{"drowsy_seats": [...]}` message to `drowsy/lect/result`. Set
-`DROWSINESS_MQTT_ENABLED=false` to disable the client, or override
-`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. The client retries when the
-broker is unavailable. Camera uploads continue to use Socket.IO at
-`/api/socket.io` through Vite's API proxy.
+Mosquitto listens on port `1883` of the Docker host with anonymous local access.
+State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
+The API accepts `drowsy/student<N>/data`, `wakey/student<N>/sensors`, and
+`drowsy/stud/<seat_id>/data`. Messages use `fsr` (0–4096), `tof` (millimeters;
+`-1` or `0` means no valid reading), and `present` (0 or 1). The API timestamps
+messages on receipt and keeps an in-memory row per seat.
+
+Camera samples use fresh sensor readings. Absence or zero FSR makes a sample
+unavailable. Drowsy camera results require FSR or ToF to exceed the configured
+threshold; the minute alert requires 30 valid samples with at least half drowsy.
+Sensor updates can reclassify the latest sample without adding another sample.
+
+The API publishes per-seat status to `drowsy/stud/<seat_id>/result` and retained
+drowsy seat lists to `drowsy/lect/result` when the alert set changes. Unchanged
+sensor-driven results publish at most once per second per seat. The existing
+hardware alert output on `drowsy/result` at QoS 1 is also retained. The live
+status reports whether that hardware alert was sent recently.
+
+Set `DROWSINESS_MQTT_ENABLED=false` to disable MQTT input and output, or override
+`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. MQTT clients retry when the
+broker is unavailable. Camera uploads use Socket.IO at `/api/socket.io` through
+the Vite API proxy.
 
 For a local test publisher and the full sensor behavior details, see the
 [MQTT guide](../README.md#mqtt).

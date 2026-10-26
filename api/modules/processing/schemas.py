@@ -30,6 +30,7 @@ class FrameMeasurements(BaseModel):
     fatigue_probability: float | None = None
     fsr_raw: int | None = None
     tof_distance_mm: int | None = None
+    present: bool | None = None
     processing_ms: float = 0.0
     error: str | None = None
 
@@ -37,8 +38,9 @@ class FrameMeasurements(BaseModel):
 class SensorMeasurements(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     fsr_raw: int
-    tof_distance_mm: int
+    tof_distance_mm: int | None
     captured_at_ms: float
+    present: bool | None = None
 
 
 class DetectionSample(BaseModel):
@@ -68,6 +70,7 @@ class DrowsinessResult(BaseModel):
     fatigue_probability: float | None
     fsr_raw: int | None
     tof_distance_mm: int | None
+    present: bool | None
     minute: MinuteSummary
     processing_ms: float
     alert: bool
@@ -102,3 +105,4 @@ class ProcessingStatus(BaseModel):
     pending_frames: int
     in_flight: bool
     detection: DrowsinessResult | None
+    mqtt_alert_sent_recently: bool = False

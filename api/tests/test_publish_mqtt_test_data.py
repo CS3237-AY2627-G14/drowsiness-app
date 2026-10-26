@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import json
-import time
 
 import aiomqtt
 
@@ -44,8 +43,8 @@ async def publish_test_reading(arguments: argparse.Namespace) -> None:
         for index in range(arguments.count):
             payload = {
                 "fsr": arguments.fsr,
-                "tof_mm": arguments.tof_mm,
-                "timestamp_ms": time.time() * 1000,
+                "tof": arguments.tof_mm,
+                "present": 1,
             }
             encoded_payload = json.dumps(payload)
             await mqtt_client.publish(topic, encoded_payload, qos=1)

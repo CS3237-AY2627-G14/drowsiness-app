@@ -98,7 +98,10 @@ export const PublishPage = () => {
           {showDiagnostics ? (
             <StreamMetrics metrics={streaming.metrics} />
           ) : null}
-          <DetectionStatus detection={streaming.detection} />
+          <DetectionStatus
+            detection={streaming.detection}
+            mqttAlertSentRecently={streaming.mqttAlertSentRecently}
+          />
         </div>
         <aside
           className="island-shell order-1 grid gap-6 rounded-2xl p-5 lg:order-2 sm:p-6"
