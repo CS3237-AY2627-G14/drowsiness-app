@@ -18,8 +18,7 @@ SENSOR_TOPIC_PATTERN = re.compile(
 
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    fsr: int = Field(ge=0, le=4096)
-    tof: int = Field(ge=-1)
+    drowsy: int = Field(ge=0, le=1)
     present: int = Field(ge=0, le=1)
 
 
@@ -105,8 +104,7 @@ class SensorMqttRouter:
             )
             return
         measurements = SensorMeasurements(
-            fsr_raw=sensor_payload.fsr,
-            tof_distance_mm=(sensor_payload.tof if sensor_payload.tof > 0 else None),
+            drowsy=sensor_payload.drowsy == 1,
             captured_at_ms=time.time_ns() / 1_000_000,
             present=sensor_payload.present == 1,
         )

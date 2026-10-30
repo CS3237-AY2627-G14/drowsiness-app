@@ -83,8 +83,8 @@ def test_alert_publishes_once_when_alert_turns_on() -> None:
                     captured_at_ms=1_792_390_000_000 + frame_id * 1000,
                     left_ear=0.1,
                     right_ear=0.1,
-                    fsr_raw=100,
-                    tof_distance_mm=100,
+                    sensor_drowsy=True,
+                    present=True,
                 )
             )
         status = await processing_service.get_status(connection_id)
