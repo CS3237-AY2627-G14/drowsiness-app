@@ -2,8 +2,7 @@ export type DetectionResult = {
   captured_at_ms: number
   ear: number | null
   fatigue_probability: number | null
-  fsr_raw: number | null
-  tof_distance_mm: number | null
+  sensor_drowsy: boolean | null
   present: boolean | null
   minute: {
     valid_samples: number

@@ -28,8 +28,7 @@ class FrameMeasurements(BaseModel):
     left_ear: float | None = None
     right_ear: float | None = None
     fatigue_probability: float | None = None
-    fsr_raw: int | None = None
-    tof_distance_mm: int | None = None
+    sensor_drowsy: bool | None = None
     present: bool | None = None
     processing_ms: float = 0.0
     error: str | None = None
@@ -37,10 +36,11 @@ class FrameMeasurements(BaseModel):
 
 class SensorMeasurements(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
-    fsr_raw: int
-    tof_distance_mm: int | None
+    upper_cm: int
+    lower_mm: int
+    back_raw: int
+    desk_raw: int
     captured_at_ms: float
-    present: bool | None = None
 
 
 class DetectionSample(BaseModel):
@@ -68,8 +68,7 @@ class DrowsinessResult(BaseModel):
     captured_at_ms: float
     ear: float | None
     fatigue_probability: float | None
-    fsr_raw: int | None
-    tof_distance_mm: int | None
+    sensor_drowsy: bool | None
     present: bool | None
     minute: MinuteSummary
     processing_ms: float

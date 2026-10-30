@@ -26,6 +26,9 @@ from modules.processing.schemas import (
     QueuedFrame,
     SensorMeasurements,
 )
+from modules.processing.services.sensor_classification import (
+    classify_sensor_measurements,
+)
 from modules.processing.utils.drowsiness_rules import (
     evaluate_measurements,
     reclassify_latest_sample,
@@ -40,8 +43,7 @@ class SeatRow(BaseModel):
 
     model_config = ConfigDict(frozen=True, strict=True)
 
-    fsr_raw: int | None = None
-    tof_distance_mm: int | None = None
+    sensor_drowsy: bool | None = None
     present: bool | None = None
     captured_at_ms: float | None = None
     received_at: float | None = None
@@ -135,14 +137,14 @@ class FrameProcessingService:
     def _update_sensor_row(
         self, row: SeatRow, measurements: SensorMeasurements, received_at: float
     ) -> SeatRow:
+        present, sensor_drowsy = classify_sensor_measurements(measurements)
         camera = row.latest_camera
         detection_state = row.detection_state
         if camera is not None and detection_state.samples:
             measured = camera.model_copy(
                 update={
-                    "fsr_raw": measurements.fsr_raw,
-                    "tof_distance_mm": measurements.tof_distance_mm,
-                    "present": measurements.present,
+                    "sensor_drowsy": sensor_drowsy,
+                    "present": present,
                 }
             )
             detection_state = reclassify_latest_sample(
@@ -150,9 +152,8 @@ class FrameProcessingService:
             )
         return row.model_copy(
             update={
-                "fsr_raw": measurements.fsr_raw,
-                "tof_distance_mm": measurements.tof_distance_mm,
-                "present": measurements.present,
+                "sensor_drowsy": sensor_drowsy,
+                "present": present,
                 "captured_at_ms": measurements.captured_at_ms,
                 "received_at": received_at,
                 "detection_state": detection_state,
@@ -297,26 +298,15 @@ class FrameProcessingService:
     def _with_fresh_sensor(
         self, row: SeatRow, measurements: FrameMeasurements
     ) -> FrameMeasurements:
-        fsr_raw, tof_distance_mm = self._get_fresh_sensor_values(row)
-        if fsr_raw is None:
-            return measurements
-        return measurements.model_copy(
-            update={
-                "fsr_raw": fsr_raw,
-                "tof_distance_mm": tof_distance_mm,
-                "present": row.present,
-            }
-        )
-
-    def _get_fresh_sensor_values(self, row: SeatRow) -> tuple[int | None, int | None]:
         if (
             row.received_at is None
-            or row.fsr_raw is None
             or self._timer.now() - row.received_at
             > self._settings.mqtt_sensor_max_age_seconds
         ):
-            return None, None
-        return row.fsr_raw, row.tof_distance_mm
+            return measurements
+        return measurements.model_copy(
+            update={"sensor_drowsy": row.sensor_drowsy, "present": row.present}
+        )
 
     def _save_connection_detection(
         self, seat_id: int, detection_state: DetectionState

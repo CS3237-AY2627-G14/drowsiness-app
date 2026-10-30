@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
-    fsr: int = Field(ge=0, le=4096)
-    tof: int = Field(ge=-1)
-    present: int = Field(ge=0, le=1)
+    upper_cm: int = Field(ge=-1)
+    lower_mm: int = Field(ge=-1)
+    back_raw: int = Field(ge=0, le=4095)
+    desk_raw: int = Field(ge=0, le=4095)
 
 
 class SensorMqttRouter:
@@ -129,9 +130,10 @@ class SensorMqttRouter:
             )
             return
         measurements = SensorMeasurements(
-            fsr_raw=sensor_payload.fsr,
-            tof_distance_mm=(sensor_payload.tof if sensor_payload.tof > 0 else None),
+            upper_cm=sensor_payload.upper_cm,
+            lower_mm=sensor_payload.lower_mm,
+            back_raw=sensor_payload.back_raw,
+            desk_raw=sensor_payload.desk_raw,
             captured_at_ms=time.time_ns() / 1_000_000,
-            present=sensor_payload.present == 1,
         )
         await self._processing_facade.submit_sensor_measurements(seat_id, measurements)

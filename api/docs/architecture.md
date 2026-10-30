@@ -59,12 +59,12 @@ record), and a connection (one publishing connection).
    processing state is opened. Any failure rolls back all of it.
 2. **Stream.** Frames are admitted and passed to processing, and detection status
    is reported to the client.
-   MQTT readings on `drowsy/student<N>/data`, `wakey/student<N>/sensors`,
-   or `drowsy/stud/<seat_id>/data` update the seat sensor row and are attached
-   to camera samples while fresh. Per-seat results publish to
-   `drowsy/stud/<seat_id>/result`, with a retained drowsy seat list on
-   `drowsy/lect/result`. The existing `drowsy/result` hardware alert and
-   recent-publication status are retained.
+   Raw four-sensor MQTT readings update per-seat state. Processing owns the
+   28-row sensor truth table, presence, camera fusion and rolling minute alerts.
+   Student nodes only acquire readings and execute per-seat alert commands.
+   Fresh readings attach to camera samples; sensor updates may reclassify the
+   latest sample without adding observations. Per-seat status and retained
+   lecturer seat lists coexist with the legacy hardware notification.
 3. **Monitor.** Each connection is checked for session expiry, processing health
    and idleness. Status reporting can be removed without affecting monitoring.
 4. **Disconnect.** Seat ownership is released, connection state is discarded, and

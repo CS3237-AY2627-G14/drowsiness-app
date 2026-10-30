@@ -84,9 +84,9 @@ def test_socketio_authentication_and_status(client: TestClient) -> None:
         assert set(status) == {"type", "detection", "mqtt_alert_sent_recently"}
         assert status["mqtt_alert_sent_recently"] is False
         assert status["detection"]["minute"] == {
-            "valid_samples": 1,
+            "valid_samples": 0,
             "drowsy_samples": 0,
-            "unavailable_samples": 59,
+            "unavailable_samples": 60,
             "window_seconds": 60,
         }
         assert status["detection"]["alert"] is False
@@ -94,7 +94,9 @@ def test_socketio_authentication_and_status(client: TestClient) -> None:
         assert "processing_ms" not in status["detection"]
         assert "fatigue_seconds" not in status["detection"]
         assert status["detection"]["fatigue_probability"] == 0.1
+        assert status["detection"]["sensor_drowsy"] is None
         assert status["detection"]["present"] is None
+        assert status["mqtt_alert_sent_recently"] is False
 
 
 def test_diagnostics_are_explicitly_requested(client: TestClient) -> None:

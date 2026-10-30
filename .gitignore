@@ -20,3 +20,5 @@ coverage/
 !.env.*.example
 *.pem
 *.key
+
+student-node-v1/config.h

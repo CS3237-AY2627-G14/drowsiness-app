@@ -56,7 +56,7 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
 
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 1234, "tof": 420, "present": 1}',
+            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -65,14 +65,15 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
                 captured_at_ms=1792390000000,
                 left_ear=0.1,
                 right_ear=0.1,
+                fatigue_probability=0.9,
             )
         )
 
         record = processing_registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
-        assert result.fsr_raw == 1234
-        assert result.tof_distance_mm == 420
+        assert result.sensor_drowsy is True
+        assert result.present is True
         assert result.minute.valid_samples == 1
         assert result.minute.drowsy_samples == 1
 
@@ -98,7 +99,7 @@ def test_firmware_sensor_topic_maps_readings_to_camera_result() -> None:
 
         await mqtt_router._handle_message(
             "wakey/student1/sensors",
-            b'{"tof":35,"fsr":2300,"present":1}',
+            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -107,21 +108,21 @@ def test_firmware_sensor_topic_maps_readings_to_camera_result() -> None:
                 captured_at_ms=1792390000000,
                 left_ear=0.1,
                 right_ear=0.1,
+                fatigue_probability=0.9,
             )
         )
 
         record = processing_registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
-        assert result.fsr_raw == 2300
-        assert result.tof_distance_mm == 35
+        assert result.sensor_drowsy is True
         assert result.present is True
         assert result.minute.drowsy_samples == 1
 
     asyncio.run(run())
 
 
-def test_firmware_invalid_tof_sentinel_is_treated_as_missing_distance() -> None:
+def test_unoccupied_firmware_sensor_sample_is_not_counted() -> None:
     async def run() -> None:
         processing_registry = InMemoryProcessingRegistry()
         settings = Settings(demo_seat_count=1)
@@ -140,7 +141,7 @@ def test_firmware_invalid_tof_sentinel_is_treated_as_missing_distance() -> None:
 
         await mqtt_router._handle_message(
             "wakey/student1/sensors",
-            b'{"tof":-1,"fsr":0,"present":0}',
+            b'{"upper_cm":7,"lower_mm":-1,"back_raw":1000,"desk_raw":1500}',
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -155,8 +156,7 @@ def test_firmware_invalid_tof_sentinel_is_treated_as_missing_distance() -> None:
         record = processing_registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
-        assert result.fsr_raw == 0
-        assert result.tof_distance_mm is None
+        assert result.sensor_drowsy is None
         assert result.present is False
         assert result.minute.valid_samples == 0
 
@@ -182,7 +182,7 @@ def test_sensor_message_without_timestamp_uses_presence_for_classification() -> 
 
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 530, "tof": 129, "present": 0}',
+            b'{"upper_cm":7,"lower_mm":-1,"back_raw":1000,"desk_raw":1500}',
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -197,8 +197,7 @@ def test_sensor_message_without_timestamp_uses_presence_for_classification() -> 
         record = processing_registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
-        assert result.fsr_raw == 530
-        assert result.tof_distance_mm == 129
+        assert result.sensor_drowsy is None
         assert result.minute.valid_samples == 0
         assert result.minute.drowsy_samples == 0
 
@@ -224,11 +223,11 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
 
         await mqtt_router._handle_message(
             "drowsy/student2/data",
-            b'{"fsr": 1234, "tof": 420, "present": 1}',
+            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
         )
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 5000, "tof": 420, "present": 1}',
+            b'{"drowsy": 2, "present": 1}',
         )
         await mqtt_router._handle_message("drowsy/student1/data", b"not-json")
         processing_service._apply_frame_measurements(
@@ -244,7 +243,7 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
         record = processing_registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
-        assert result.fsr_raw is None and result.tof_distance_mm is None
+        assert result.sensor_drowsy is None and result.present is None
         assert result.minute.valid_samples == 0
         assert result.minute.drowsy_samples == 0
 
@@ -271,7 +270,7 @@ def test_expired_sensor_measurements_make_camera_drowsiness_unavailable() -> Non
         await processing_service.associate_seat(connection_id, 1)
         await mqtt_router._handle_message(
             "drowsy/student1/data",
-            b'{"fsr": 0, "tof": 420, "present": 1}',
+            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
         )
         timer.current_time = 5.1
         processing_service._apply_frame_measurements(
@@ -287,7 +286,7 @@ def test_expired_sensor_measurements_make_camera_drowsiness_unavailable() -> Non
         record = processing_registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
-        assert result.fsr_raw is None and result.tof_distance_mm is None
+        assert result.sensor_drowsy is None and result.present is None
         assert result.minute.valid_samples == 0
         assert result.minute.drowsy_samples == 0
 
@@ -316,7 +315,14 @@ def _runtime(
 
 
 def _sensor_message(fsr: int, tof_mm: int, *, present: int = 1) -> bytes:
-    return json.dumps({"fsr": fsr, "tof": tof_mm, "present": present}).encode()
+    return json.dumps(
+        {
+            "upper_cm": 7,
+            "lower_mm": 150 if present else -1,
+            "back_raw": fsr,
+            "desk_raw": 1500 if fsr else 0,
+        }
+    ).encode()
 
 
 def _camera_frame(
@@ -334,7 +340,7 @@ def _camera_frame(
 def _raise_alert(
     processing_service: FrameProcessingService, connection_id: UUID
 ) -> None:
-    for index in range(30):
+    for index in range(10):
         processing_service._apply_frame_measurements(
             _camera_frame(connection_id, index + 1, float(index * 1000))
         )
@@ -390,7 +396,9 @@ def test_sensor_absence_reclassifies_latest_camera_sample(
         assert record.processed_frames == 1
         assert len(record.detection_state.samples) == 1
         assert record.detection_state.samples[-1].drowsy is None
-        assert record.detection_state.detection.fsr_raw == fsr
+        assert record.detection_state.detection.sensor_drowsy is (
+            True if fsr and present else None
+        )
         assert record.detection_state.detection.present is bool(present)
         assert publisher.updates == [
             SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
@@ -472,7 +480,7 @@ def test_repeated_sensor_readings_inside_one_second_publish_once() -> None:
         )
         record = registry.get(connection_id)
         assert record is not None and record.detection_state.detection is not None
-        assert record.detection_state.detection.fsr_raw == 200
+        assert record.detection_state.detection.sensor_drowsy is True
 
     asyncio.run(run())
 
@@ -546,7 +554,7 @@ def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
         await processing_service.open_connection(connection_id)
         await processing_service.associate_seat(connection_id, 1)
         measurements = SensorMeasurements(
-            fsr_raw=100, tof_distance_mm=420, captured_at_ms=2000.0, present=True
+            upper_cm=7, lower_mm=150, back_raw=100, desk_raw=1500, captured_at_ms=2000.0
         )
         await processing_service.submit_sensor_measurements(1, measurements)
         processing_service._apply_frame_measurements(
@@ -556,7 +564,7 @@ def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
         publisher.updates.clear()
         timer.current_time = 1.0
         outdated_measurements = measurements.model_copy(
-            update={"fsr_raw": 0, "captured_at_ms": timestamp_ms}
+            update={"desk_raw": 0, "captured_at_ms": timestamp_ms}
         )
 
         await processing_service.submit_sensor_measurements(1, outdated_measurements)
