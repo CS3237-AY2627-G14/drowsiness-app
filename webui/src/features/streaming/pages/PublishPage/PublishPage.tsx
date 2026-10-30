@@ -1,9 +1,11 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { Button } from '#/components/ui/Button'
 import { useStreaming } from '../../hooks/useStreaming'
 import { useClassrooms } from '../../hooks/useClassrooms'
 import { usePublishTarget } from './hooks/usePublishTarget'
+import { useCameraDevices } from './hooks/useCameraDevices'
+import { CameraSelector } from './components/CameraSelector'
 import { CameraPreview } from './components/CameraPreview'
 import { ConnectionStatus } from './components/ConnectionStatus'
 import { PublishControls } from './components/PublishControls'
@@ -19,6 +21,8 @@ export const PublishPage = () => {
     refetch: refetchClassrooms,
   } = useClassrooms()
   const streaming = useStreaming()
+  const [cameraDeviceId, setCameraDeviceId] = useState('')
+  const cameraDevices = useCameraDevices(streaming.hasPreview)
   const { room, seat, token, selectRoom, selectSeat, setToken } =
     usePublishTarget(classrooms)
   const showDiagnostics = import.meta.env.DEV
@@ -39,7 +43,10 @@ export const PublishPage = () => {
     void refetchClassrooms()
   }
   const handleStartCamera = () => {
-    void streaming.startCamera()
+    void streaming.startCamera(cameraDeviceId || undefined)
+  }
+  const handleRefreshCameras = () => {
+    void cameraDevices.refetch()
   }
   const handlePublish = () => {
     if (seat) void streaming.publish({ seatId: seat.id, token })
@@ -104,7 +111,7 @@ export const PublishPage = () => {
           />
         </div>
         <aside
-          className="island-shell order-1 grid gap-6 rounded-2xl p-5 lg:order-2 sm:p-6"
+          className="island-shell order-1 grid min-w-0 gap-6 rounded-2xl p-5 lg:order-2 sm:p-6"
           aria-label="Streaming controls"
         >
           {room ? (
@@ -122,6 +129,16 @@ export const PublishPage = () => {
               {classroomsMessage}
             </p>
           ) : null}
+          <CameraSelector
+            cameras={cameraDevices.data ?? []}
+            deviceId={cameraDeviceId}
+            disabled={!streaming.canStartCamera}
+            isRefreshing={cameraDevices.isFetching}
+            canEnumerate={cameraDevices.canEnumerate}
+            hasError={cameraDevices.isError}
+            onChange={setCameraDeviceId}
+            onRefresh={handleRefreshCameras}
+          />
           <PublishControls
             canStartCamera={canStartCamera}
             canPublish={canPublish}
