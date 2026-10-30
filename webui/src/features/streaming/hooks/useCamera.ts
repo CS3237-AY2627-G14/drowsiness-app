@@ -29,7 +29,7 @@ export const useCamera = (): CameraControls => {
     setRequest(null)
   }, [])
 
-  const open = async (): Promise<boolean> => {
+  const open = async (deviceId?: string): Promise<boolean> => {
     if (activeRequestRef.current !== null) return false
     const id = Symbol('camera request')
     activeRequestRef.current = id
@@ -45,7 +45,7 @@ export const useCamera = (): CameraControls => {
       return false
     }
     try {
-      await camera.open({ video, canvas })
+      await camera.open({ video, canvas, deviceId })
       if (activeRequestRef.current !== id) return false
       setRequest({ pending: false, error: null })
       return true

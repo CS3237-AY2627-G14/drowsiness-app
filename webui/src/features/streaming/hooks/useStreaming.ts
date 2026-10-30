@@ -30,9 +30,9 @@ export const useStreaming = () => {
     closeCamera()
   }, [stopSampling, closeStream, closeCamera])
 
-  const startCamera = async () => {
+  const startCamera = async (deviceId?: string) => {
     stop()
-    await openCamera()
+    await openCamera(deviceId)
   }
 
   const publish = async (target: PublishTarget) => {

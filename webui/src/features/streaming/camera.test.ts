@@ -177,3 +177,36 @@ it('reports a camera interruption once and closes its resources', async () => {
   expect(media.track.stop).toHaveBeenCalledOnce()
   expect(await camera.captureFrame()).toBeNull()
 })
+
+it('requests the selected camera exactly without imposing the upload frame rate', async () => {
+  const media = createMedia()
+  getUserMedia.mockResolvedValueOnce(media.stream)
+  const preview = createPreview()
+  const camera = createCamera(vi.fn())
+  await camera.open({ ...preview.elements, deviceId: 'remote-camera' })
+  expect(getUserMedia).toHaveBeenCalledWith({
+    audio: false,
+    video: {
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+      deviceId: { exact: 'remote-camera' },
+      resizeMode: { ideal: 'none' },
+    },
+  })
+  camera.close()
+})
+
+it('reports a missing selected camera without opening a different camera', async () => {
+  const missing = new DOMException(
+    'Selected camera disconnected',
+    'NotFoundError',
+  )
+  getUserMedia.mockRejectedValueOnce(missing)
+  const preview = createPreview()
+  const camera = createCamera(vi.fn())
+  await expect(
+    camera.open({ ...preview.elements, deviceId: 'disconnected-camera' }),
+  ).rejects.toBe(missing)
+  expect(getUserMedia).toHaveBeenCalledOnce()
+  expect(preview.video.srcObject).toBeNull()
+})

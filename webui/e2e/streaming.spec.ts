@@ -633,3 +633,95 @@ test('keeps emitting frames without receiving detection or diagnostic messages',
   ).toBeVisible()
   await page.getByRole('button', { name: 'Stop', exact: true }).click()
 })
+
+test('selects a camera without overflowing controls and refreshes devices without switching an active preview', async ({
+  page,
+}) => {
+  await page.route('**/api/classrooms', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 101,
+          name: 'Room 101',
+          seats: [{ id: 1, room_id: 101, seat_number: 1 }],
+        },
+      ],
+    }),
+  )
+  await page.addInitScript(() => {
+    const mediaDevices = navigator.mediaDevices
+    const getUserMedia = mediaDevices.getUserMedia.bind(mediaDevices)
+    let connected = true
+    mediaDevices.enumerateDevices = async () =>
+      connected
+        ? [
+            {
+              kind: 'videoinput',
+              deviceId: 'remote-camera',
+              label: 'Integrated Full HD Camera (USB Video Device 1920x1080)',
+              groupId: '',
+              toJSON: () => ({}),
+            },
+          ]
+        : []
+    mediaDevices.getUserMedia = (constraints) => {
+      const video = constraints?.video as MediaTrackConstraints
+      if (
+        video.deviceId &&
+        JSON.stringify(video.deviceId) !==
+          JSON.stringify({ exact: 'remote-camera' })
+      )
+        return Promise.reject(new DOMException('Wrong camera', 'NotFoundError'))
+      document.documentElement.dataset.cameraId = JSON.stringify(video.deviceId)
+      return getUserMedia({ audio: false, video: true })
+    }
+    window.addEventListener('disconnect-test-camera', () => {
+      connected = false
+      mediaDevices.dispatchEvent(new Event('devicechange'))
+    })
+  })
+  await page.goto('/streaming')
+  const selector = page.getByLabel('Camera', { exact: true })
+  await expect(selector.locator('option')).toHaveCount(2)
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    const layout = await page.evaluate(() => {
+      const sidebar = document.querySelector('aside')!
+      const sidebarBounds = sidebar.getBoundingClientRect()
+      const controls = sidebar.querySelectorAll('select, button, input')
+      return {
+        fitsViewport: document.documentElement.scrollWidth <= window.innerWidth,
+        controlsFitSidebar: Array.from(controls).every((control) => {
+          const bounds = control.getBoundingClientRect()
+          return (
+            bounds.left >= sidebarBounds.left &&
+            bounds.right <= sidebarBounds.right
+          )
+        }),
+      }
+    })
+    expect(layout).toEqual({ fitsViewport: true, controlsFitSidebar: true })
+  }
+  await selector.selectOption('remote-camera')
+  await page.getByRole('button', { name: 'Start camera' }).click()
+  await expect(page.getByRole('status')).toHaveText('Preview ready')
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-camera-id',
+    '{"exact":"remote-camera"}',
+  )
+  await expect(selector).toBeDisabled()
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event('disconnect-test-camera')),
+  )
+  await expect(selector.locator('option:checked')).toHaveText(
+    'Selected camera unavailable',
+  )
+  await expect(page.getByRole('status')).toHaveText('Preview ready')
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect(selector).toBeEnabled()
+  await selector.selectOption('')
+  await page
+    .getByRole('button', { name: 'Refresh cameras', exact: true })
+    .click()
+  await expect(selector.locator('option')).toHaveCount(1)
+})
