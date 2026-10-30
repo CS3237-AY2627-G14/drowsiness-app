@@ -5,7 +5,6 @@ from modules.processing.services.sensor_classification import (
     classify_sensor_measurements,
 )
 
-# Expected outcomes transcribed independently from the original 28-row table.
 EXPECTED = [
     None,
     None,

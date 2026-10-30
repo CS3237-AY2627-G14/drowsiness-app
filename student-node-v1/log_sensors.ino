@@ -1,4 +1,4 @@
-// Libraries (Library Manager): ESP32MQTTClient, Adafruit_VL53L0X
+// Libraries (Library Manager): ESP32MQTTClient, Adafruit_VL53L0X, ArduinoJson
 // Board: DOIT ESP32 DEVKIT V1
 //
 // Wiring:
@@ -11,16 +11,17 @@
 //   FSR desk       one leg -> 3.3 V, other leg -> GPIO 35 AND 10k -> GND
 
 #include <ArduinoJson.h>
-#include "config.h"
 #include <WiFi.h>
 #include <Wire.h>
 #include <Adafruit_VL53L0X.h>
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
 
-// Settings are supplied by the ignored local config.h.
-#define BUZZER_PASSIVE 0
-#define DEBUG 1
+// ---------- Settings to change ----------
+#include "config.h"
+
+#define BUZZER_PASSIVE 0  // 0 = kit "Active Buzzer", 1 = kit "Passive Buzzer"
+#define DEBUG 1           // 1 = print all sensor readings to Serial Monitor every 0.5 s, 0 = off
 
 // ---------- Pins ----------
 const int LED_PIN = 14;
@@ -36,11 +37,11 @@ const unsigned long BLINK_MS = 1000;   // LED + buzzer switch every 1 s
 
 // ---------- Timing ----------
 const unsigned long SENSOR_MS = 200;    // read sensors every 200 ms
+const unsigned long PUBLISH_MS = 200;
 const unsigned long DEBUG_MS = 500;     // debug print every 0.5 s
 
 const char alertTopic[] = "drowsy/stud/" SEAT_ID "/result";
 const char dataTopic[] = "drowsy/stud/" SEAT_ID "/data";
-
 
 ESP32MQTTClient mqttClient;
 Adafruit_VL53L0X tof;
@@ -60,9 +61,8 @@ int lowerMm = -1;    // ToF, -1 = out of range
 int backValue = 0;
 int deskValue = 0;
 
-// Outputs
-
 unsigned long lastSensor = 0;
+unsigned long lastPublish = 0;
 unsigned long lastDebug = 0;
 
 // ================= Alert (LED + buzzer) =================
@@ -133,16 +133,19 @@ int readTofMm() {
 }
 
 void printDebug() {
-  Serial.printf("upper=%d cm lower=%d mm back=%d desk=%d\n",
+  Serial.printf("upper=%4d cm | lower=%4d mm | back=%4d | desk=%4d\n",
                 upperCm, lowerMm, backValue, deskValue);
 }
 
 void publishData() {
   if (!mqttClient.isConnected()) return;
+  StaticJsonDocument<256> doc;
+  doc["upper_cm"] = upperCm;
+  doc["lower_mm"] = lowerMm;
+  doc["back_raw"] = backValue;
+  doc["desk_raw"] = deskValue;
   char json[128];
-  snprintf(json, sizeof(json),
-           "{\"upper_cm\":%d,\"lower_mm\":%d,\"back_raw\":%d,\"desk_raw\":%d}",
-           upperCm, lowerMm, backValue, deskValue);
+  serializeJson(doc, json, sizeof(json));
   mqttClient.publish(dataTopic, json, 0, false);
 }
 
@@ -151,7 +154,7 @@ void readSensors() {
   lowerMm = readTofMm();
   backValue = analogRead(FSR_BACK_PIN);
   deskValue = analogRead(FSR_DESK_PIN);
-  publishData();
+
 }
 
 // ================= setup / loop =================
@@ -192,6 +195,10 @@ void loop() {
     lastSensor = now;
     readSensors();
   }
+  if (now - lastPublish >= PUBLISH_MS) {
+    lastPublish = now;
+    publishData();
+  }
 
 #if DEBUG
   if (now - lastDebug >= DEBUG_MS) {
@@ -205,9 +212,12 @@ void loop() {
 void onMqttConnect(esp_mqtt_client_handle_t client) {
   if (mqttClient.isMyTurn(client)) {
     mqttClient.subscribe(alertTopic, [](const std::string &payload) {
+      Serial.printf("%s: %s\n", alertTopic, payload.c_str());
+      StaticJsonDocument<256> doc;
+      DeserializationError error = deserializeJson(doc, payload.c_str());
+      if (error || !doc["drowsy"].is<bool>()) return;
+
       static bool previousDrowsy = false;
-      StaticJsonDocument<128> doc;
-      if (deserializeJson(doc, payload.c_str()) || !doc["drowsy"].is<bool>()) return;
       bool drowsy = doc["drowsy"].as<bool>();
       if (drowsy && !previousDrowsy) alertRequested = true;
       previousDrowsy = drowsy;
