@@ -18,7 +18,6 @@ def calculate_mean_ear(measurements: FrameMeasurements) -> float | None:
     return (left_ear + right_ear) / 2
 
 
-# if camera classifies drowsy check TOF OR FSR thresholds to double check if drowsy
 def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool | None:
     if measurements.present is False:
         return None
@@ -99,3 +98,28 @@ def evaluate_measurements(
         alert=alert,
     )
     return DetectionState(samples=samples, detection=detection)
+
+
+def reclassify_latest_sample(
+    state: DetectionState, measurements: FrameMeasurements, settings: Settings
+) -> DetectionState:
+    """Replace the latest sample's decision without appending another sample."""
+    detection = state.detection
+    if not state.samples or detection is None:
+        return state
+    latest_sample = state.samples[-1]
+    is_drowsy = classify_frame(measurements, settings)
+    samples = (
+        *state.samples[:-1],
+        DetectionSample(captured_at_ms=latest_sample.captured_at_ms, drowsy=is_drowsy),
+    )
+    minute = build_minute_summary(samples)
+    updated_detection = detection.model_copy(
+        update={
+            "sensor_drowsy": measurements.sensor_drowsy,
+            "present": measurements.present,
+            "minute": minute,
+            "alert": should_raise_alert(minute),
+        }
+    )
+    return DetectionState(samples=samples, detection=updated_detection)

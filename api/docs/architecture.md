@@ -59,13 +59,12 @@ record), and a connection (one publishing connection).
    processing state is opened. Any failure rolls back all of it.
 2. **Stream.** Frames are admitted and passed to processing, and detection status
    is reported to the client.
-   MQTT readings on `drowsy/student<N>/data` or `wakey/student<N>/sensors` are
-   mapped to seat N and attached to that seat's camera results while the reading
-   is fresh. The ESP32 drowsy flag is fused with the camera: an ESP32 drowsy
-   result counts when the camera also detects drowsiness or detects no face, but
-   a camera result showing an awake face overrides it. When the rolling alert
-   threshold is reached, processing queues the seat identifier for MQTT
-   publication.
+   Raw four-sensor MQTT readings update per-seat state. Processing owns the
+   28-row sensor truth table, presence, camera fusion and rolling minute alerts.
+   Student nodes only acquire readings and execute per-seat alert commands.
+   Fresh readings attach to camera samples; sensor updates may reclassify the
+   latest sample without adding observations. Per-seat status and retained
+   lecturer seat lists coexist with the legacy hardware notification.
 3. **Monitor.** Each connection is checked for session expiry, processing health
    and idleness. Status reporting can be removed without affecting monitoring.
 4. **Disconnect.** Seat ownership is released, connection state is discarded, and

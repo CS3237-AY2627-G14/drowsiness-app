@@ -4,14 +4,18 @@ import json
 
 import aiomqtt
 
+from modules.processing.mqtt_topics import build_student_data_topic
+
 
 def parse_arguments() -> argparse.Namespace:
     argument_parser = argparse.ArgumentParser(
-        description="Publish test drowsiness and presence flags to the local broker."
+        description="Publish raw sensor readings to the local broker."
     )
     argument_parser.add_argument("--student", type=int, default=1)
-    argument_parser.add_argument("--drowsy", type=int, choices=(0, 1), default=1)
-    argument_parser.add_argument("--present", type=int, choices=(0, 1), default=1)
+    argument_parser.add_argument("--upper-cm", type=int, default=7)
+    argument_parser.add_argument("--lower-mm", type=int, default=150)
+    argument_parser.add_argument("--back-raw", type=int, default=1000)
+    argument_parser.add_argument("--desk-raw", type=int, default=1500)
     argument_parser.add_argument("--host", default="127.0.0.1")
     argument_parser.add_argument("--port", type=int, default=1883)
     argument_parser.add_argument("--count", type=int, default=10)
@@ -29,15 +33,17 @@ def parse_arguments() -> argparse.Namespace:
 
 
 async def publish_test_reading(arguments: argparse.Namespace) -> None:
-    topic = f"wakey/student{arguments.student}/sensors"
+    topic = build_student_data_topic(arguments.student)
     async with aiomqtt.Client(
         hostname=arguments.host,
         port=arguments.port,
     ) as mqtt_client:
         for index in range(arguments.count):
             payload = {
-                "drowsy": arguments.drowsy,
-                "present": arguments.present,
+                "upper_cm": arguments.upper_cm,
+                "lower_mm": arguments.lower_mm,
+                "back_raw": arguments.back_raw,
+                "desk_raw": arguments.desk_raw,
             }
             encoded_payload = json.dumps(payload)
             await mqtt_client.publish(topic, encoded_payload, qos=1)
@@ -49,7 +55,7 @@ async def publish_test_reading(arguments: argparse.Namespace) -> None:
 
     print(
         "With the API and camera stream running for this seat, "
-        "check the ESP32 and camera results in the live detection status."
+        "check the base sensor and camera results in the live detection status."
     )
 
 

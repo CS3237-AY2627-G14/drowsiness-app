@@ -59,7 +59,7 @@ export const DetectionStatus = ({
           <dd>{fatigueProbability}</dd>
         </div>
         <div>
-          <dt>ESP32 drowsy result</dt>
+          <dt>Sensor drowsiness</dt>
           <dd>
             {detection?.sensor_drowsy == null
               ? '—'
@@ -90,11 +90,11 @@ export const DetectionStatus = ({
       <p className="mt-4 text-xs text-[var(--sea-ink-soft)]">
         One picture per second counts toward the minute. An alert needs at least
         10 valid pictures, with half or more showing signs of drowsiness.
-        Missing sensor readings and unoccupied seats do not count. An ESP32
-        drowsy result is counted as drowsy when the camera also detects
-        drowsiness or no face is detected; a detected awake face overrides the
-        ESP32 result. The MQTT indicator reflects a successful publish in the
-        last 10 seconds.
+        Missing sensor readings and unoccupied seats do not count. A
+        base-derived sensor drowsy result is counted as drowsy when the camera
+        also detects drowsiness or no face is detected; a detected awake face
+        overrides the sensor result. The MQTT indicator reflects a successful
+        publish in the last 10 seconds.
       </p>
       {detection?.present === false ? (
         <p className="mt-2 text-sm">Seat unoccupied.</p>

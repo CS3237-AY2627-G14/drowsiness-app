@@ -1,5 +1,10 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+)
 
 import socketio
 from fastapi import FastAPI
@@ -18,6 +23,7 @@ from modules.processing.inference import InferenceRuntime, create_inference_runt
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.mqtt_result_publisher import MqttResultPublisher
 from modules.processing.mqtt_router import SensorMqttRouter
+from modules.processing.publishing import QueueSeatStatusPublisher, SeatStatusUpdate
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
 from modules.processing.services.frame_processing_service import FrameProcessingService
 from modules.sessions.facade import SessionsFacade
@@ -79,7 +85,8 @@ def build_streaming(
     socket_server: socketio.AsyncServer,
     sessions_facade: SessionsFacade,
     inference_runtime: InferenceRuntime,
-    mqtt_result_publisher: MqttResultPublisher,
+    status_publisher: QueueSeatStatusPublisher | None = None,
+    mqtt_result_publisher: MqttResultPublisher | None = None,
 ) -> tuple[StreamingSocketRouter, FrameProcessingService, ProcessingFacade]:
     processing_registry = InMemoryProcessingRegistry()
     frame_buffer = FrameBuffer()
@@ -88,6 +95,7 @@ def build_streaming(
         frame_buffer,
         inference_runtime.frame_predictor,
         configuration,
+        status_publisher=status_publisher,
         mqtt_result_publisher=mqtt_result_publisher,
     )
     processing_facade = ProcessingFacade(frame_processing_service)
@@ -129,6 +137,12 @@ def create_app(
             configuration, classrooms_facade, seats, application_clock
         )
         application.state.classrooms_facade = classrooms_facade
+        status_updates: asyncio.Queue[SeatStatusUpdate] = asyncio.Queue()
+        status_publisher = (
+            QueueSeatStatusPublisher(status_updates)
+            if configuration.mqtt_enabled
+            else None
+        )
         async with inference_factory(configuration) as inference_runtime:
             mqtt_result_publisher = MqttResultPublisher(configuration)
             (
@@ -140,25 +154,21 @@ def create_app(
                 socket_server,
                 sessions_facade,
                 inference_runtime,
+                status_publisher,
                 mqtt_result_publisher,
             )
-            sensor_mqtt_router = SensorMqttRouter(configuration, processing_facade)
-            try:
+            sensor_mqtt_router = SensorMqttRouter(
+                configuration, processing_facade, status_updates
+            )
+            async with AsyncExitStack() as shutdown_stack:
+                shutdown_stack.push_async_callback(mqtt_result_publisher.stop)
+                shutdown_stack.push_async_callback(frame_processing_service.stop)
+                shutdown_stack.push_async_callback(streaming_socket_router.stop)
+                shutdown_stack.push_async_callback(sensor_mqtt_router.stop)
                 frame_processing_service.start(inference_runtime.workers)
                 sensor_mqtt_router.start()
                 mqtt_result_publisher.start()
                 yield
-            finally:
-                try:
-                    await sensor_mqtt_router.stop()
-                finally:
-                    try:
-                        await streaming_socket_router.stop()
-                    finally:
-                        try:
-                            await frame_processing_service.stop()
-                        finally:
-                            await mqtt_result_publisher.stop()
 
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)
     application.include_router(classrooms_router)

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import re
 import time
 
 import aiomqtt
@@ -9,23 +8,34 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from core.config import Settings
 from modules.processing.facade import ProcessingFacade, SensorMeasurements
+from modules.processing.mqtt_topics import (
+    STUDENT_DATA_SUBSCRIPTIONS,
+    parse_seat_id,
+)
+from modules.processing.publishing import SeatStatusUpdate, build_mqtt_publications
 
 logger = logging.getLogger(__name__)
-SENSOR_TOPIC_PATTERN = re.compile(
-    r"(?:drowsy/student([1-9]\d*)/data|wakey/student([1-9]\d*)/sensors)"
-)
 
 
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    drowsy: int = Field(ge=0, le=1)
-    present: int = Field(ge=0, le=1)
+
+    upper_cm: int = Field(ge=-1)
+    lower_mm: int = Field(ge=-1)
+    back_raw: int = Field(ge=0, le=4095)
+    desk_raw: int = Field(ge=0, le=4095)
 
 
 class SensorMqttRouter:
-    def __init__(self, settings: Settings, processing_facade: ProcessingFacade) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        processing_facade: ProcessingFacade,
+        status_updates: asyncio.Queue[SeatStatusUpdate],
+    ) -> None:
         self._settings = settings
         self._processing_facade = processing_facade
+        self._status_updates = status_updates
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -57,11 +67,13 @@ class SensorMqttRouter:
                     hostname=self._settings.mqtt_host,
                     port=self._settings.mqtt_port,
                 ) as mqtt_client:
-                    await mqtt_client.subscribe("drowsy/+/data")
-                    await mqtt_client.subscribe("wakey/+/sensors")
-                    async for message in mqtt_client.messages:
-                        await self._handle_message(message.topic.value, message.payload)
-            except aiomqtt.MqttError as error:
+                    for subscription in STUDENT_DATA_SUBSCRIPTIONS:
+                        await mqtt_client.subscribe(subscription)
+                    async with asyncio.TaskGroup() as task_group:
+                        task_group.create_task(self._receive_messages(mqtt_client))
+                        task_group.create_task(self._publish_updates(mqtt_client))
+            except* aiomqtt.MqttError as error_group:
+                error = error_group.exceptions[0]
                 logger.warning(
                     "MQTT connection failed for %s:%d: %s; retrying in 5 seconds",
                     self._settings.mqtt_host,
@@ -70,12 +82,26 @@ class SensorMqttRouter:
                 )
                 await asyncio.sleep(5)
 
+    async def _receive_messages(self, mqtt_client: aiomqtt.Client) -> None:
+        async for message in mqtt_client.messages:
+            await self._handle_message(message.topic.value, message.payload)
+
+    async def _publish_updates(self, mqtt_client: aiomqtt.Client) -> None:
+        while True:
+            update = await self._status_updates.get()
+            publications = build_mqtt_publications(update)
+            for publication in publications:
+                await mqtt_client.publish(
+                    publication.topic,
+                    publication.payload,
+                    qos=0,
+                    retain=publication.retain,
+                )
+
     async def _handle_message(self, topic: str, payload: bytes) -> None:
-        topic_match = SENSOR_TOPIC_PATTERN.fullmatch(topic)
-        if topic_match is None:
-            logger.warning("Ignoring MQTT message on unsupported topic")
+        seat_id = parse_seat_id(topic)
+        if seat_id is None:
             return
-        seat_id = int(topic_match.group(1) or topic_match.group(2))
         if seat_id > self._settings.demo_seat_count:
             logger.warning(
                 "Ignoring MQTT message for unknown student seat_id=%d", seat_id
@@ -104,8 +130,10 @@ class SensorMqttRouter:
             )
             return
         measurements = SensorMeasurements(
-            drowsy=sensor_payload.drowsy == 1,
+            upper_cm=sensor_payload.upper_cm,
+            lower_mm=sensor_payload.lower_mm,
+            back_raw=sensor_payload.back_raw,
+            desk_raw=sensor_payload.desk_raw,
             captured_at_ms=time.time_ns() / 1_000_000,
-            present=sensor_payload.present == 1,
         )
         await self._processing_facade.submit_sensor_measurements(seat_id, measurements)

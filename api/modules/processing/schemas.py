@@ -36,9 +36,11 @@ class FrameMeasurements(BaseModel):
 
 class SensorMeasurements(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
-    drowsy: bool
+    upper_cm: int
+    lower_mm: int
+    back_raw: int
+    desk_raw: int
     captured_at_ms: float
-    present: bool
 
 
 class DetectionSample(BaseModel):
