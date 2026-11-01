@@ -2,7 +2,8 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 import socketio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from core.clock import Clock, SystemClock
 from core.config import Settings
@@ -13,6 +14,10 @@ from modules.classrooms.repositories.room_repository import InMemoryRoomReposito
 from modules.classrooms.repositories.seat_repository import InMemorySeatRepository
 from modules.classrooms.router import router as classrooms_router
 from modules.classrooms.service import ClassroomsService
+from modules.processing.calibration.facade import CalibrationFacade
+from modules.processing.calibration.repository import CalibrationRepository
+from modules.processing.calibration.router import router as calibration_router
+from modules.processing.calibration.service import CalibrationService
 from modules.processing.facade import ProcessingFacade
 from modules.processing.inference import InferenceRuntime, create_inference_runtime
 from modules.processing.inference.frame_buffer import FrameBuffer
@@ -80,6 +85,7 @@ def build_streaming(
     sessions_facade: SessionsFacade,
     inference_runtime: InferenceRuntime,
     mqtt_result_publisher: MqttResultPublisher,
+    calibration_service: CalibrationService | None = None,
 ) -> tuple[StreamingSocketRouter, FrameProcessingService, ProcessingFacade]:
     processing_registry = InMemoryProcessingRegistry()
     frame_buffer = FrameBuffer()
@@ -89,8 +95,9 @@ def build_streaming(
         inference_runtime.frame_predictor,
         configuration,
         mqtt_result_publisher=mqtt_result_publisher,
+        calibration_service=calibration_service,
     )
-    processing_facade = ProcessingFacade(frame_processing_service)
+    processing_facade = ProcessingFacade(frame_processing_service, calibration_service)
     streaming_registry = InMemoryStreamingRegistry()
     streaming_service = StreamingService(
         streaming_registry, sessions_facade, processing_facade
@@ -129,6 +136,13 @@ def create_app(
             configuration, classrooms_facade, seats, application_clock
         )
         application.state.classrooms_facade = classrooms_facade
+        calibration_repository = CalibrationRepository(
+            configuration.calibration_directory.resolve()
+        )
+        calibration_service = CalibrationService(
+            calibration_repository, configuration, application_clock
+        )
+        await calibration_service.start()
         async with inference_factory(configuration) as inference_runtime:
             mqtt_result_publisher = MqttResultPublisher(configuration)
             (
@@ -141,6 +155,11 @@ def create_app(
                 sessions_facade,
                 inference_runtime,
                 mqtt_result_publisher,
+                calibration_service,
+            )
+            application.state.processing_facade = processing_facade
+            application.state.calibration_facade = CalibrationFacade(
+                calibration_service, frame_processing_service
             )
             sensor_mqtt_router = SensorMqttRouter(configuration, processing_facade)
             try:
@@ -158,10 +177,27 @@ def create_app(
                         try:
                             await frame_processing_service.stop()
                         finally:
-                            await mqtt_result_publisher.stop()
+                            try:
+                                await mqtt_result_publisher.stop()
+                            finally:
+                                await calibration_service.stop()
 
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)
     application.include_router(classrooms_router)
+    application.include_router(calibration_router)
+
+    @application.exception_handler(ValueError)
+    @application.exception_handler(RuntimeError)
+    async def handle_calibration_error(
+        request: Request, error: Exception
+    ) -> JSONResponse:
+        if not request.url.path.startswith("/api/calibration"):
+            raise error
+        return JSONResponse(
+            status_code=503 if isinstance(error, RuntimeError) else 409,
+            content={"detail": str(error)},
+        )
+
     socket_application = socketio.ASGIApp(socket_server, socketio_path=None)
     application.mount("/api/socket.io", socket_application)
 

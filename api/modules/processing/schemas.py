@@ -16,6 +16,11 @@ class QueuedFrame(BaseModel):
     connection_id: UUID
     frame: FrameInput
     received_at: float
+    sensor: "SensorMeasurements | None" = None
+    generation: int = 0
+    calibration_at: float | None = None
+    recording_id: str | None = None
+    comparisons: dict[str, "SensorMeasurements"] = {}
 
 
 class FrameMeasurements(BaseModel):
@@ -32,13 +37,19 @@ class FrameMeasurements(BaseModel):
     present: bool | None = None
     processing_ms: float = 0.0
     error: str | None = None
+    sensor_score: float | None = None
+    sensor_model_version: str | None = None
+    sensor_unavailable_reason: str | None = None
 
 
 class SensorMeasurements(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
-    drowsy: bool
+    drowsy: bool | None
     captured_at_ms: float
-    present: bool
+    present: bool | None
+    score: float | None = None
+    model_version: str | None = None
+    unavailable_reason: str | None = None
 
 
 class DetectionSample(BaseModel):
@@ -71,6 +82,9 @@ class DrowsinessResult(BaseModel):
     minute: MinuteSummary
     processing_ms: float
     alert: bool
+    sensor_score: float | None = None
+    sensor_model_version: str | None = None
+    sensor_unavailable_reason: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

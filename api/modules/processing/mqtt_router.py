@@ -8,6 +8,7 @@ import aiomqtt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from core.config import Settings
+from modules.processing.calibration.schemas import RawTelemetry
 from modules.processing.facade import ProcessingFacade, SensorMeasurements
 
 logger = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ SENSOR_TOPIC_PATTERN = re.compile(
 
 class MqttSensorPayload(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    drowsy: int = Field(ge=0, le=1)
+    drowsy: int = Field(ge=-1, le=1)
     present: int = Field(ge=0, le=1)
 
 
@@ -59,6 +60,7 @@ class SensorMqttRouter:
                 ) as mqtt_client:
                     await mqtt_client.subscribe("drowsy/+/data")
                     await mqtt_client.subscribe("wakey/+/sensors")
+                    await mqtt_client.subscribe("drowsy/student1/raw")
                     async for message in mqtt_client.messages:
                         await self._handle_message(message.topic.value, message.payload)
             except aiomqtt.MqttError as error:
@@ -71,6 +73,16 @@ class SensorMqttRouter:
                 await asyncio.sleep(5)
 
     async def _handle_message(self, topic: str, payload: bytes) -> None:
+        if topic == "drowsy/student1/raw":
+            if len(payload) > 1024:
+                return
+            try:
+                raw = RawTelemetry.model_validate_json(payload)
+            except ValidationError:
+                logger.warning("Ignoring invalid raw telemetry")
+                return
+            await self._processing_facade.submit_raw_telemetry(raw)
+            return
         topic_match = SENSOR_TOPIC_PATTERN.fullmatch(topic)
         if topic_match is None:
             logger.warning("Ignoring MQTT message on unsupported topic")
@@ -104,8 +116,11 @@ class SensorMqttRouter:
             )
             return
         measurements = SensorMeasurements(
-            drowsy=sensor_payload.drowsy == 1,
+            drowsy=None if sensor_payload.drowsy == -1 else sensor_payload.drowsy == 1,
             captured_at_ms=time.time_ns() / 1_000_000,
             present=sensor_payload.present == 1,
+            unavailable_reason="legacy_no_result"
+            if sensor_payload.drowsy == -1
+            else None,
         )
         await self._processing_facade.submit_sensor_measurements(seat_id, measurements)

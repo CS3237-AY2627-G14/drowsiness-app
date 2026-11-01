@@ -1,5 +1,7 @@
 from uuid import UUID
 
+from modules.processing.calibration.schemas import RawTelemetry
+from modules.processing.calibration.service import CalibrationService
 from modules.processing.exceptions import ProcessingException
 from modules.processing.schemas import (
     DrowsinessResult,
@@ -22,8 +24,18 @@ __all__ = [
 
 
 class ProcessingFacade:
-    def __init__(self, frame_processing_service: FrameProcessingService) -> None:
+    def __init__(
+        self,
+        frame_processing_service: FrameProcessingService,
+        calibration_service: CalibrationService | None = None,
+    ) -> None:
         self._frame_processing_service = frame_processing_service
+        self._calibration_service = calibration_service
+
+    async def submit_raw_telemetry(self, telemetry: RawTelemetry) -> None:
+        if self._calibration_service is None:
+            raise RuntimeError("Calibration unavailable")
+        await self._calibration_service.receive(telemetry)
 
     async def open_connection(self, connection_id: UUID) -> None:
         await self._frame_processing_service.open_connection(connection_id)

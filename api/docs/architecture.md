@@ -79,6 +79,36 @@ record), and a connection (one publishing connection).
 - Shutdown closes connections first, then stops inference scheduling, then stops
   the inference workers.
 
+## Persistent sensor calibration
+
+Processing owns raw student1 telemetry, recording/label storage, temporal feature
+extraction, grouped validation, training jobs, and model selection. Its calibration
+router delegates through a calibration facade to services and a SQLite repository.
+The browser accesses HTTP/SSE endpoints under `/api/calibration`.
+
+Initialize SQLite separately with `python -m modules.processing.calibration init`.
+Startup only reads existing schema, recovers interrupted jobs/recordings, and
+loads the selected artifact. Rooms, authorization, and connections remain
+in memory; calibration recordings, revisions, snapshots, and model selection
+persist in the configured local data directory. Keep one API process.
+
+Raw telemetry contains all four readings plus boot identity, sequence, and uptime.
+Server receipt time aligns recordings and rehearsals. The same two-second feature
+extraction is used online and during training. Validation splits entire recordings,
+including preprocessing; reserved recordings never affect fitting or threshold
+selection. Training runs outside the event loop and never activates automatically.
+
+Before activation the corrected legacy rules remain available. After activation
+raw telemetry owns seat 1's gate, and missing evidence stays unknown. Admission
+snapshots sensor evidence before camera inference. Activation clears sensor and
+detection history and invalidates outstanding results from the previous model
+generation while keeping publisher ownership.
+
+Rehearsal recording stores camera measurements and snapshots of active, legacy,
+and candidate gates, without images. Counterfactual replay uses the same fusion
+and rolling-alert rules; only the active live path publishes hardware alerts.
+See [the operator guide](../../docs/sensor-calibration.md).
+
 ## Frontend
 
 The browser captures and publishes camera frames over the streaming socket.

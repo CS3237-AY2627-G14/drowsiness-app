@@ -33,3 +33,5 @@ class Settings(BaseSettings):
     mqtt_host: str = "127.0.0.1"
     mqtt_port: PositiveInt = 1883
     mqtt_sensor_max_age_seconds: float = Field(default=5.0, gt=0)
+    calibration_directory: Path = Path(".local/calibration")
+    sensor_presence_mm: PositiveInt = 300

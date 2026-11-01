@@ -46,6 +46,32 @@ Demo tokens look like `demo-room-101-seat-1`. Use Ctrl+C to stop the API and Vit
 `docker compose down` stops the broker. When using WSL, open the page in your
 Windows browser to use its camera. WSL execution remains unverified.
 
+## Sensor calibration
+
+After `uv sync --locked`, initialize persistent calibration storage explicitly:
+
+```text
+uv run python -m modules.processing.calibration init
+```
+
+Restart the API and open http://localhost:3000/calibration. The backend adds
+scikit-learn and joblib for recording-session validation, training, and artifacts.
+Training runs in a background thread; activation is explicit and reversible.
+
+`DROWSINESS_CALIBRATION_DIRECTORY` defaults to `.local/calibration` and
+`DROWSINESS_SENSOR_PRESENCE_MM` to `300`. Startup never creates or migrates schema.
+Without initialized storage, existing monitoring works but persistent calibration
+operations return 503. SQLite recordings, label revisions, immutable dataset
+snapshots, models, reports, and selection survive restarts. Stop the API before
+backing up the complete directory. Rooms and authorization sessions remain
+in memory.
+
+The `/api/calibration` API provides recordings, labels, CSV export, live SSE
+telemetry, background training, reports, selection/rollback, and camera rehearsal
+reports. See `/docs` for schemas and the [operator guide](../docs/sensor-calibration.md)
+for exact workflows. See the [backend changelog](../changelogs/2026-11-02-sensor-calibration/backend.md)
+for implementation and verification details.
+
 ## Configuration
 
 Copying [.env.example](.env.example) supplies the required session TTL, seat count
@@ -69,9 +95,10 @@ Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local acc
 in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
 The API subscribes to `drowsy/+/data` and `wakey/+/sensors`; topics named
 `drowsy/student<N>/data` or `wakey/student<N>/sensors` map readings to seat N.
-Messages are UTF-8 JSON with `drowsy` and `present` encoded as `0` or `1`. The
+Messages are UTF-8 JSON with `present` encoded as `0` or `1` and `drowsy` as
+`0`, `1`, or `-1` (unknown). Unknown immediately clears the previous result. The
 API timestamps each message when it receives it and attaches fresh results to
-that seat's camera detections. The ESP32 determines sensor drowsiness: when it
+that seat's camera detections. The baseline ESP32 rules determine sensor drowsiness: when it
 reports drowsy, the combined sample is drowsy if the camera agrees or detects
 no face; a camera result showing an awake face overrides it. Unoccupied or
 stale sensor results do not count. Set `DROWSINESS_MQTT_ENABLED=false` to disable
@@ -83,6 +110,15 @@ uploads continue to use Socket.IO at `/api/socket.io` through Vite's API proxy.
 
 For a local test publisher and the full sensor behavior details, see the
 [MQTT guide](../README.md#mqtt).
+
+The API also subscribes to `drowsy/student1/raw`, the permanent 5 Hz telemetry
+topic. It evaluates the corrected legacy rules from raw readings before model
+activation. After activation, only the learned raw-telemetry classification can
+set seat 1's sensor gate; stale or missing raw telemetry becomes unknown.
+Camera frames snapshot sensor evidence on admission, and model changes clear
+sensor buffers and rolling detection history. Camera thresholds and the rolling
+alert rule remain unchanged. Candidate rehearsal measurements do not publish
+hardware alerts and contain no images.
 
 ## Checks
 
