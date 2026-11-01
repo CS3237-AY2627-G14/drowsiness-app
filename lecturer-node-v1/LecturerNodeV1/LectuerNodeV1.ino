@@ -11,12 +11,14 @@
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
 
+#include "config.h"
+
 WiFiMulti wifiMulti;
 
 
 //Insert SSID and Password
-const char *ssid = "Insert_SSID_here";
-const char *pass = "Insert_Password_here";
+const char *ssid = WIFI_SSID;
+const char *pass = WIFI_PASSWORD;
 
 #define LEDPIN 5
 #define LEDCHANNEL 1
@@ -30,7 +32,7 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 uint32_t delayMS;
 
-const char *server = "mqtt://IP_address_of_base:1883"; //Set to your Base's IP address
+const char *server = MQTT_URI; //Set to your Base's IP address
 
 const char *subscribeTopic = "drowsy/result"; //Topic Name (Important!)
 
