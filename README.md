@@ -7,6 +7,7 @@ other project code as sibling directories, using the tooling suited to each one.
 | --- | --- | --- | --- |
 | [`api/`](api/) | FastAPI backend, inference, and local MQTT broker configuration | Python 3.12, uv, Docker Compose | [API guide](api/README.md) |
 | [`webui/`](webui/) | React camera client | Node.js 22.x (22.12+), npm, Vite | [Web client guide](webui/README.md) |
+| [`student-node-v1/`](student-node-v1/) | ESP32 sensors, raw telemetry, LED/buzzer | Arduino IDE / ESP32 toolchain | [Firmware guide](student-node-v1/README.md) |
 
 ## Get started
 
@@ -41,6 +42,26 @@ The API runs at http://localhost:8000; health is at `/health` and API docs at
 MQTT carries sensor input and drowsiness alert notifications; camera uploads use
 Socket.IO.
 
+## Sensor calibration
+
+The ESP32 sends raw measurements continuously. The backend learns a sensor gate
+from labelled staged postures; camera inference confirms possible drowsiness.
+Saved recordings and model versions support repeated calibration.
+
+1. Configure/upload the [student sketch](student-node-v1/README.md).
+2. From `api/`, run `uv run python -m modules.processing.calibration init`, then
+   start the broker, API, and web client as above.
+3. Open http://localhost:3000/calibration. Record and label at least three
+   independent development sessions containing both awake and drowsy postures.
+4. Train a candidate, review validation and a separate reserved session, rehearse
+   with seat 1's camera, then explicitly activate it. Older models remain
+   available for rollback; corrections reuse existing recordings.
+
+See the complete [operator guide](docs/sensor-calibration.md) and dated
+[system](changelogs/2026-11-02-sensor-calibration/system.md),
+[firmware](changelogs/2026-11-02-sensor-calibration/firmware.md), and
+[backend](changelogs/2026-11-02-sensor-calibration/backend.md) changelogs.
+
 ## Configuration
 
 Copying [api/.env.example](api/.env.example) supplies the required session TTL,
@@ -64,13 +85,21 @@ Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local acc
 State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
 The API subscribes to `drowsy/+/data` and the firmware topic
 `wakey/+/sensors`; `student<N>` maps to seat N. Messages are UTF-8 JSON with
-`drowsy` and `present` encoded as `0` or `1`. The ESP32 determines the sensor
-drowsiness result; the API combines it with the camera result and timestamps
-each message when received:
+`present` encoded as `0` or `1` and `drowsy` as `0`, `1`, or `-1` (unknown).
+Legacy ESP32 classifications remain the baseline; the API combines them with
+camera results and timestamps each message when received:
 
 ```json
 {"drowsy": 1, "present": 1}
 ```
+
+Updated firmware also sends versioned four-sensor packets every 200 ms on
+`drowsy/student1/raw`. Before activation, the API evaluates the legacy rules
+against raw readings when available. After activation, seat 1 uses its learned
+raw-telemetry model exclusively; legacy flags cannot overwrite it. Unknown
+packets clear the previous legacy classification. Calibration data persists
+in `api/.local/calibration`; rooms, sessions, and live detection history remain
+in memory. The [calibration guide](docs/sensor-calibration.md) defines the packet.
 
 The latest sensor result is attached to that seat's camera detection when it
 is no more than five seconds old. A sample for an unoccupied seat or without a
