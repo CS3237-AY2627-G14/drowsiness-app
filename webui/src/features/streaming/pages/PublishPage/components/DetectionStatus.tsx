@@ -16,6 +16,16 @@ const formatFatigueProbability = (
   return `${percentage.toFixed(0)}%`
 }
 
+const formatSensorState = (value: boolean | null | undefined) => {
+  if (value == null) return '—'
+  return value ? 'Possible drowsy' : 'Not drowsy'
+}
+
+const formatPresence = (value: boolean | null | undefined) => {
+  if (value == null) return '—'
+  return value ? 'Yes' : 'No'
+}
+
 export const DetectionStatus = ({
   detection,
   mqttAlertSentRecently,
@@ -59,24 +69,25 @@ export const DetectionStatus = ({
           <dd>{fatigueProbability}</dd>
         </div>
         <div>
-          <dt>ESP32 drowsy result</dt>
-          <dd>
-            {detection?.sensor_drowsy == null
-              ? '—'
-              : detection.sensor_drowsy
-                ? 'Drowsy'
-                : 'Not drowsy'}
-          </dd>
+          <dt>Sensor gate</dt>
+          <dd>{formatSensorState(detection?.sensor_drowsy)}</dd>
         </div>
         <div>
-          <dt>Present</dt>
+          <dt>Sensor score / model</dt>
           <dd>
-            {detection?.present == null
-              ? '—'
-              : detection.present
-                ? 'Yes'
-                : 'No'}
+            {detection?.sensor_score?.toFixed(3) ?? '—'} /{' '}
+            {detection?.sensor_model_version?.slice(0, 8) ?? 'Legacy baseline'}
           </dd>
+        </div>
+        {detection?.sensor_unavailable_reason && (
+          <div>
+            <dt>Sensor status</dt>
+            <dd>{detection.sensor_unavailable_reason.replaceAll('_', ' ')}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Present</dt>
+          <dd>{formatPresence(detection?.present)}</dd>
         </div>
         <div>
           <dt>MQTT alert publish</dt>
@@ -93,9 +104,12 @@ export const DetectionStatus = ({
         Missing sensor readings and unoccupied seats do not count. An ESP32
         drowsy result is counted as drowsy when the camera also detects
         drowsiness or no face is detected; a detected awake face overrides the
-        ESP32 result. The MQTT indicator reflects a successful publish in the
+        sensor gate. The MQTT indicator reflects a successful publish in the
         last 10 seconds.
       </p>
+      <a className="text-sm underline" href="/calibration">
+        Open sensor calibration
+      </a>
       {detection?.present === false ? (
         <p className="mt-2 text-sm">Seat unoccupied.</p>
       ) : detection && !detection.face_detected ? (

@@ -2,6 +2,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { streamFrames } from './streamFrames'
 import type { CapturedFrame } from './types/camera.types'
 
+vi.mock('#/lib/config', () => ({ videoConfig: { frameRate: 10 } }))
+
 afterEach(() => {
   vi.useRealTimers()
 })

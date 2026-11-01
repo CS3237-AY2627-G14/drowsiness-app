@@ -12,6 +12,9 @@ export type DetectionResult = {
   }
   alert: boolean
   face_detected: boolean
+  sensor_score?: number | null
+  sensor_model_version?: string | null
+  sensor_unavailable_reason?: string | null
 }
 
 export type StreamDiagnostics = {

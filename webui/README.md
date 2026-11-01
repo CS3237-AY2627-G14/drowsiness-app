@@ -25,6 +25,27 @@ or trusted HTTPS. For remote cameras, set both `DEV_TLS_CERT` and `DEV_TLS_KEY`
 in `.env.local` and add the exact HTTPS origin to the API's
 `DROWSINESS_ALLOWED_ORIGINS`. Certificate paths resolve from `webui/`.
 
+## Sensor calibration
+
+Open http://localhost:3000/calibration after initializing API calibration storage
+with `uv run python -m modules.processing.calibration init` from `api/` and
+restarting the API. The page displays live sensor plots, occupancy, freshness,
+active/candidate scores, and model selection for student1/seat 1.
+
+Start a recording, label stable awake/drowsy-posture intervals, leave transitions
+unlabelled, and stop. Saved recordings support interval correction, exclusion,
+and CSV export. Select three development recordings with both classes to train;
+review grouped validation, reserved-test results, and camera rehearsals before
+explicit activation. Older versions and the legacy baseline support rollback.
+
+For camera rehearsal, publish seat 1 at `/streaming` in another tab while recording
+a labelled rehearsal. The candidate is compared without triggering hardware;
+the selected recording shows fused false alerts and alert onset latency.
+
+The browser uses backend HTTP/SSE APIs rather than connecting directly to MQTT.
+See the [complete operator guide](../docs/sensor-calibration.md) and
+[system changelog](../changelogs/2026-11-02-sensor-calibration/system.md).
+
 ## Checks
 
 From `webui/`:
