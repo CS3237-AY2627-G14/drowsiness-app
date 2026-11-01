@@ -1,9 +1,10 @@
 // CS3237 Team 14 "Wakey Wakey" - ESP32 student node (4 sensors)
 //
 // Does two jobs at the same time, using millis() timers:
-//   1. ALERT:  listens on drowsy/<NODE_ID>/alert. When the laptop publishes "1",
+//   1. ALERT:  listens on drowsy/result for {"id":"A1"}.
 //              the LED blinks and the buzzer beeps for 5 seconds.
-//   2. STATE:  reads 4 sensors every 200 ms, works out "present" and "drowsy"
+//   2. RAW:    publishes all 4 sensors every 200 ms on drowsy/<NODE_ID>/raw.
+//   3. STATE:  works out legacy "present" and "drowsy"
 //              from the team's truth table, and publishes to drowsy/<NODE_ID>/data:
 //              {"present":1,"drowsy":0}     drowsy: 1 = drowsy, 0 = not drowsy, -1 = no result
 //              every second, and straight away when present or drowsy changes.
@@ -29,13 +30,16 @@
 #include <Adafruit_VL53L0X.h>
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
+#include <algorithm>
+#include <cctype>
+#include <esp_random.h>
+#include "config.h"
 
 // ---------- Settings to change ----------
-const char *ssid = "gajin";
-const char *pass = "jin123456";
+const char *ssid = WIFI_SSID;
+const char *pass = WIFI_PASSWORD;
 // Laptop running Mosquitto (ipconfig -> IPv4 Address). Same WiFi as the ESP32.
-const char *server = "mqtt://192.168.137.1:1883";
-#define NODE_ID "student1"
+const char *server = MQTT_URI;
 
 #define BUZZER_PASSIVE 0  // 0 = kit "Active Buzzer", 1 = kit "Passive Buzzer"
 #define DEBUG 1           // 1 = print all sensor readings to Serial Monitor every 0.5 s, 0 = off
@@ -69,6 +73,11 @@ const unsigned long DEBUG_MS = 500;     // debug print every 0.5 s
 
 const char alertTopic[] = "drowsy/result";
 const char dataTopic[] = "drowsy/" NODE_ID "/data";
+const char rawTopic[] = "drowsy/" NODE_ID "/raw";
+char bootId[33];
+uint32_t rawSequence = 0;
+uint32_t previousUptime = 0;
+uint64_t uptimeEpoch = 0;
 
 enum Level { LOW_L, MED_L, HIGH_L };
 enum DeskLevel { DESK_LOWER, DESK_CLOSE, DESK_HIGHER };
@@ -221,7 +230,7 @@ const State ROW_RESULT[29] = {
 };
 
 Level upperLevel() {
-  if (upperCm < 0) return LOW_L;  // no echo (-1) = Low
+  if (upperCm < 0) return HIGH_L;  // classification handles missing echoes separately
   return threeLevels(upperCm, US_LOW_MAX_CM, US_MED_MAX_CM);
 }
 
@@ -249,6 +258,7 @@ int currentRow() {
 
 // 1 = drowsy, 0 = not drowsy, -1 = no result
 int drowsyValue(int r) {
+  if (upperCm < 0) return -1;
   State st = ROW_RESULT[r];
   if (st == DROWSY) return 1;
   if (st == NOT_DROWSY) return 0;
@@ -260,7 +270,7 @@ void printDebug() {
   const char *levelNames[] = {"Low", "Medium", "High"};
   const char *deskNames[] = {"Lower", "Close", "Higher"};
   Serial.printf("upper=%4d cm (%-6s) | lower=%4d mm (%-12s) | back=%4d (%-6s) | desk=%4d (%-6s) | row %2d -> present=%d drowsy=%d\n",
-                upperCm, levelNames[upperLevel()], lowerMm, tofDetected() ? "Detected" : "Out-Of-Range",
+                upperCm, upperCm < 0 ? "Invalid" : levelNames[upperLevel()], lowerMm, tofDetected() ? "Detected" : "Out-Of-Range",
                 backValue, levelNames[backLevel()], deskValue, deskNames[deskLevel()],
                 row, present ? 1 : 0, drowsyValue(row));
 }
@@ -273,16 +283,36 @@ void publishData() {
   mqttClient.publish(dataTopic, json, 0, false);
 }
 
+void publishRaw() {
+  if (!mqttClient.isConnected()) return;
+  uint32_t currentUptime = millis();
+  if (currentUptime < previousUptime) uptimeEpoch += (1ULL << 32);
+  previousUptime = currentUptime;
+  char upper[16], lower[16], json[320];
+  if (upperCm < 0) snprintf(upper, sizeof(upper), "null");
+  else snprintf(upper, sizeof(upper), "%d", upperCm);
+  if (lowerMm < 0) snprintf(lower, sizeof(lower), "null");
+  else snprintf(lower, sizeof(lower), "%d", lowerMm);
+  snprintf(json, sizeof(json),
+    "{\"schema_version\":1,\"boot_id\":\"%s\",\"sequence\":%lu,\"uptime_ms\":%llu,"
+    "\"upper_cm\":%s,\"lower_mm\":%s,\"back_adc\":%d,\"desk_adc\":%d}",
+    bootId, (unsigned long)rawSequence++,
+    (unsigned long long)(uptimeEpoch + currentUptime), upper, lower, backValue, deskValue);
+  mqttClient.publish(rawTopic, json, 0, false);
+}
+
 void readSensors() {
+  int previousDrowsy = drowsyValue(row);
   upperCm = readUltrasonicCm();
   lowerMm = readTofMm();
   backValue = analogRead(FSR_BACK_PIN);
   deskValue = analogRead(FSR_DESK_PIN);
+  publishRaw();
 
   // No delay: present and drowsy update on every reading (every 200 ms)
   int newRow = currentRow();
   bool newPresent = tofDetected();
-  bool changed = (newPresent != present) || (drowsyValue(newRow) != drowsyValue(row));
+  bool changed = (newPresent != present) || (drowsyValue(newRow) != previousDrowsy);
   present = newPresent;
   row = newRow;
 
@@ -296,6 +326,9 @@ void readSensors() {
 
 void setup() {
   Serial.begin(115200);
+  snprintf(bootId, sizeof(bootId), "%08lx%08lx%08lx%08lx",
+    (unsigned long)esp_random(), (unsigned long)esp_random(),
+    (unsigned long)esp_random(), (unsigned long)esp_random());
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(US_TRIG_PIN, OUTPUT);
