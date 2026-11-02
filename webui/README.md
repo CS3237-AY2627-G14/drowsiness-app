@@ -25,6 +25,24 @@ or trusted HTTPS. For remote cameras, set both `DEV_TLS_CERT` and `DEV_TLS_KEY`
 in `.env.local` and add the exact HTTPS origin to the API's
 `DROWSINESS_ALLOWED_ORIGINS`. Certificate paths resolve from `webui/`.
 
+## Choosing a camera
+
+Use **Camera** to choose a connected webcam or a virtual/remote camera exposed
+as a webcam by your operating system. Click **Refresh cameras** after connecting
+one. Browsers may hide cameras and names until permission is granted: start the
+default camera, allow access, then click **Stop** and choose your camera.
+Stop before switching cameras. A disconnected selection is shown as unavailable;
+choose another camera or reconnect it before starting again.
+
+For a camera on another phone or computer, open this page on that device using
+trusted HTTPS and publish from there. The camera selector lists devices available
+to the current browser; it does not accept IP camera or RTSP stream URLs.
+On Windows, enable camera access for desktop apps in Windows camera privacy
+settings as well as camera permission for this site in your browser.
+
+`VITE_VIDEO_FPS` controls JPEG upload sampling. The camera uses its supported
+capture rate independently so low upload rates do not prevent camera startup.
+
 ## Checks
 
 From `webui/`:

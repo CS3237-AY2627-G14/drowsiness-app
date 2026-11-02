@@ -20,6 +20,7 @@ export const openCameraCapture = async (
   canvas: HTMLCanvasElement,
   signal: AbortSignal,
   onCameraEnded: () => void,
+  deviceId?: string,
 ): Promise<CameraCapture> => {
   if (
     !window.isSecureContext ||
@@ -34,8 +35,9 @@ export const openCameraCapture = async (
   const constraints = {
     width: { ideal: videoConfig.width },
     height: { ideal: videoConfig.height },
-    frameRate: { ideal: videoConfig.frameRate, max: videoConfig.frameRate },
-    facingMode: { ideal: 'user' },
+    ...(deviceId
+      ? { deviceId: { exact: deviceId } }
+      : { facingMode: { ideal: 'user' } }),
     resizeMode: { ideal: 'none' },
   }
   const camera = await navigator.mediaDevices.getUserMedia({
