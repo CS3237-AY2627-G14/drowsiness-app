@@ -177,7 +177,11 @@ def test_expiry_closes_connection(client: TestClient, clock: MutableClock) -> No
         assert socket.receive()["code"] == "session_expired"
 
 
-@pytest.mark.parametrize("payload", ["unexpected", b"short", b"x" * 1_048_589])
+@pytest.mark.parametrize(
+    "payload",
+    ["unexpected", b"short", b"x" * 1_048_589],
+    ids=["text", "short", "oversized"],
+)
 def test_invalid_frame_closes_connection(
     client: TestClient, payload: bytes | str
 ) -> None:

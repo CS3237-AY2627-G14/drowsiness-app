@@ -96,6 +96,9 @@ def evaluate_measurements(
         minute=minute,
         processing_ms=measurements.processing_ms,
         alert=alert,
+        sensor_score=measurements.sensor_score,
+        sensor_model_version=measurements.sensor_model_version,
+        sensor_unavailable_reason=measurements.sensor_unavailable_reason,
     )
     return DetectionState(samples=samples, detection=detection)
 
@@ -118,6 +121,9 @@ def reclassify_latest_sample(
         update={
             "sensor_drowsy": measurements.sensor_drowsy,
             "present": measurements.present,
+            "sensor_score": measurements.sensor_score,
+            "sensor_model_version": measurements.sensor_model_version,
+            "sensor_unavailable_reason": measurements.sensor_unavailable_reason,
             "minute": minute,
             "alert": should_raise_alert(minute),
         }

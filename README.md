@@ -7,6 +7,7 @@ other project code as sibling directories, using the tooling suited to each one.
 | --- | --- | --- | --- |
 | [`api/`](api/) | FastAPI backend, inference, and local MQTT broker configuration | Python 3.12, uv, Docker Compose | [API guide](api/README.md) |
 | [`student-node-v1/`](student-node-v1/) | Raw sensor acquisition and alert actuator | Arduino ESP32 | [Firmware guide](student-node-v1/README.md) |
+| [`lecturer-node-v1/`](lecturer-node-v1/) | ESP32 lecturer seat-list display and alerts | Arduino ESP32 | [Firmware guide](lecturer-node-v1/README.md) |
 | [`webui/`](webui/) | React camera client | Node.js 22.x (22.12+), npm, Vite | [Web client guide](webui/README.md) |
 
 ## Get started
@@ -42,6 +43,26 @@ The API runs at http://localhost:8000; health is at `/health` and API docs at
 MQTT carries sensor input and drowsiness alert notifications; camera uploads use
 Socket.IO.
 
+## Sensor calibration
+
+The ESP32 sends raw measurements continuously. The backend learns a sensor gate
+from labelled staged postures; camera inference confirms possible drowsiness.
+Saved recordings and model versions support repeated calibration.
+
+1. Configure/upload the [student sketch](student-node-v1/README.md).
+2. From `api/`, run `uv run python -m modules.processing.calibration init`, then
+   start the broker, API, and web client as above.
+3. Open http://localhost:3000/calibration. Record and label at least three
+   independent development sessions containing both awake and drowsy postures.
+4. Train a candidate, review validation and a separate reserved session, rehearse
+   with seat 1's camera, then explicitly activate it. Older models remain
+   available for rollback; corrections reuse existing recordings.
+
+See the complete [operator guide](docs/sensor-calibration.md) and dated
+[system](changelogs/2026-11-02-sensor-calibration/system.md),
+[firmware](changelogs/2026-11-02-sensor-calibration/firmware.md), and
+[backend](changelogs/2026-11-02-sensor-calibration/backend.md) changelogs.
+
 ## Configuration
 
 Copying [api/.env.example](api/.env.example) supplies the required session TTL,
@@ -61,48 +82,41 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto listens on the Docker host's port 1883. Student nodes publish raw JSON
-to `drowsy/stud/<seat_id>/data`; `drowsy/student<N>/data` and
-`wakey/student<N>/sensors` remain accepted aliases:
+Student nodes publish versioned telemetry every 200 ms to
+`drowsy/stud/<seat_id>/data` (QoS 0, non-retained):
 
 ```json
-{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}
+{"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
 ```
 
-Distances use -1 for an invalid reading; ADC values range from 0 to 4095.
-The base derives presence and the nullable sensor result using the original
-28-row truth table. ToF below 300 mm indicates presence. Ultrasonic levels split
-at 5 and 9 cm, backrest levels at 0 and 3000, and desk levels at 1000 and 2000.
-An absent seat or a desk reading below 1000 produces no result.
+Distances are centimetres and millimetres; invalid distances are `null`.
+ADC readings range from 0 to 4095. Boot identity, sequence and uptime reject old
+packets. Reflash all student nodes with this API; older payloads are unsupported.
 
-Fresh sensor results (at most five seconds old) are fused with camera frames.
-A drowsy sensor result counts if the camera agrees or has no face measurements;
-an awake camera result overrides it. An awake sensor result counts as awake.
-Unavailable or stale readings do not count. The rolling minute uses the latest
-picture per second and requires 10 valid samples, at least half drowsy.
-Sensor updates reclassify the latest sample without adding observations.
+The API owns the corrected sensor truth table and learned seat 1 classifier.
+Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence
+(up to five seconds old) combines with camera measurements. Sensor-awake counts
+as awake; sensor-drowsy counts when the camera agrees or has no face measurements.
+An awake camera overrides a drowsy sensor. Missing evidence and unoccupied seats
+do not count. New sensor readings can revise the latest combined sample without
+adding observations. The rolling minute uses the latest picture per second and
+requires ten valid samples with at least half drowsy.
 
-The base publishes `{"drowsy":true}` to `drowsy/stud/<seat_id>/result`.
-Student nodes run their five-second alert on a false-to-true transition.
-Sensor-driven status publishes at most once per second, except alert changes.
-Changes to the alert set publish retained `{"drowsy_seats":[1,3]}` messages to
-`drowsy/lect/result`. The legacy lecturer notification remains
-`{"id":"A1"}` on `drowsy/result` at QoS 1; its seat label is still hardcoded.
-The live status indicates successful legacy publication within ten seconds.
+Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
+Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
+publications occur at most once per second, except alert changes. The lecturer
+receives retained `{"drowsy_seats":[1,3]}` on `drowsy/lect/result`; empty lists clear
+its display. The old hardcoded A1 notification is removed. The UI publication
+indicator is per-seat and confirms broker publication, not hardware execution.
 
-Set `DROWSINESS_MQTT_ENABLED=false` to disable MQTT, or configure
-`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. Clients retry broker failures.
-Camera uploads continue over Socket.IO.
+Set `DROWSINESS_MQTT_ENABLED=false` to disable MQTT or configure
+`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. Connections retry broker failures
+and refresh current status after reconnect. Camera uploads use Socket.IO.
 
-From `api/`, publish ten raw readings with:
-
-```bash
-uv run python tests/test_publish_mqtt_test_data.py
-uv run python tests/test_publish_mqtt_test_data.py --lower-mm -1
-```
-
-Deploy the API and reflash students together: summarized drowsy/present inputs
-are no longer accepted. See the student firmware README for setup.
+See the [calibration guide](docs/sensor-calibration.md) for recording, training, rehearsal,
+activation and rollback. Calibration data persists locally; live history remains
+in memory. Rehearsal is a one-second diagnostic, stores no images, and candidate
+comparisons do not trigger hardware alerts.
 
 ## Checks
 

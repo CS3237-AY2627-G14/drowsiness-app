@@ -10,9 +10,10 @@
 
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
+#include "config.h"
 
-const char *ssid = "insert_SSID";
-const char *pass = "insert_Password";
+const char *ssid = WIFI_SSID;
+const char *pass = WIFI_PASSWORD;
 
 #define LEDPIN 5
 #define LEDCHANNEL 1
@@ -22,10 +23,10 @@ const char *pass = "insert_Password";
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-const char *server = "mqtt://Base_Node_IP:1883";
-const char *subscribeTopic = "drowsy/result";
+const char *server = MQTT_URI;
+const char *subscribeTopic = "drowsy/lect/result";
 
-constexpr size_t ID_LIST_CAPACITY = 96;
+constexpr size_t ID_LIST_CAPACITY = 1280;
 constexpr uint32_t LCD_SCROLL_INTERVAL_MS = 500;
 constexpr uint32_t ALARM_PHASE_MS = 150;
 
@@ -38,6 +39,9 @@ struct DisplayData
 DisplayData pendingData;
 portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
 bool updatePending = false;
+bool alarmPending = false;
+// Owned by the MQTT callback; invalid messages do not establish a baseline.
+bool initialSnapshotPending = true;
 ESP32MQTTClient mqttClient;
 
 DisplayData displayData;
@@ -85,6 +89,58 @@ bool appendId(JsonVariant value, char *destination, size_t capacity, size_t &len
     length += textLength;
     destination[length] = '\0';
     return true;
+}
+
+bool hasAddedSeats(const DisplayData &previousData, const DisplayData &newData)
+{
+    const char *newId = newData.ids;
+    while (*newId != '\0')
+    {
+        const size_t newLength = strcspn(newId, ",");
+        const char *previousId = previousData.ids;
+        bool found = false;
+        while (*previousId != '\0')
+        {
+            const size_t previousLength = strcspn(previousId, ",");
+            if (newLength == previousLength && strncmp(newId, previousId, newLength) == 0)
+            {
+                found = true;
+                break;
+            }
+            previousId += previousLength;
+            if (*previousId != '\0')
+            {
+                previousId += 2;
+            }
+        }
+        if (!found)
+        {
+            return true;
+        }
+        newId += newLength;
+        if (*newId != '\0')
+        {
+            newId += 2;
+        }
+    }
+    return false;
+}
+
+void queueDisplayData(const DisplayData &newData)
+{
+    // Only the MQTT callback writes pendingData; loop() only copies it.
+    const bool shouldAlarm = !initialSnapshotPending && hasAddedSeats(pendingData, newData);
+    initialSnapshotPending = false;
+    if (newData.numberStudents == pendingData.numberStudents && strcmp(newData.ids, pendingData.ids) == 0)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&dataMux);
+    pendingData = newData;
+    updatePending = true;
+    alarmPending = alarmPending || shouldAlarm;
+    portEXIT_CRITICAL(&dataMux);
 }
 
 void renderLcd(const DisplayData &data)
@@ -182,6 +238,7 @@ void setup()
 void loop()
 {
     bool hasNewData = false;
+    bool shouldAlarm = false;
 
     portENTER_CRITICAL(&dataMux);
     if (updatePending)
@@ -189,14 +246,20 @@ void loop()
         displayData = pendingData;
         updatePending = false;
         hasNewData = true;
+        shouldAlarm = alarmPending;
+        alarmPending = false;
     }
     portEXIT_CRITICAL(&dataMux);
 
     if (hasNewData)
     {
         scrollOffset = 0;
+        lastScrollAt = millis();
         renderLcd(displayData);
-        startAlarm();
+        if (shouldAlarm)
+        {
+            startAlarm();
+        }
     }
 
     const uint32_t now = millis();
@@ -215,9 +278,13 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
 {
     if (mqttClient.isMyTurn(client))
     {
+        initialSnapshotPending = true;
+        portENTER_CRITICAL(&dataMux);
+        alarmPending = false;
+        portEXIT_CRITICAL(&dataMux);
         mqttClient.subscribe(subscribeTopic, [](const std::string &payload)
         {
-            StaticJsonDocument<512> doc;
+            StaticJsonDocument<4096> doc;
             const DeserializationError error = deserializeJson(doc, payload.c_str());
             if (error)
             {
@@ -225,48 +292,30 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
                 return;
             }
 
-            if (!doc["number_students"].is<int>() || doc["number_students"].as<int>() < 0)
+            if (!doc["drowsy_seats"].is<JsonArray>())
             {
-                log_i("JSON must contain a non-negative integer 'number_students'");
-                return;
-            }
-            if (doc["id"].isNull())
-            {
-                log_i("JSON does not contain 'id'");
+                log_i("JSON must contain a 'drowsy_seats' array");
                 return;
             }
 
             DisplayData newData;
-            newData.numberStudents = doc["number_students"].as<int>();
             size_t idsLength = 0;
-            bool validIds = true;
-
-            if (doc["id"].is<JsonArray>())
+            for (JsonVariant id : doc["drowsy_seats"].as<JsonArray>())
             {
-                for (JsonVariant id : doc["id"].as<JsonArray>())
+                if (!id.is<int>() || id.as<int>() <= 0)
                 {
-                    if (!appendId(id, newData.ids, sizeof(newData.ids), idsLength))
-                    {
-                        validIds = false;
-                        break;
-                    }
+                    log_i("Seat IDs must be positive integers");
+                    return;
                 }
-            }
-            else
-            {
-                validIds = appendId(doc["id"], newData.ids, sizeof(newData.ids), idsLength);
-            }
-
-            if (!validIds)
-            {
-                log_i("'id' must be a string, number, or an array of strings/numbers that fits the display buffer");
-                return;
+                if (!appendId(id, newData.ids, sizeof(newData.ids), idsLength))
+                {
+                    log_i("Seat IDs exceed the display buffer");
+                    return;
+                }
+                ++newData.numberStudents;
             }
 
-            portENTER_CRITICAL(&dataMux);
-            pendingData = newData;
-            updatePending = true;
-            portEXIT_CRITICAL(&dataMux);
+            queueDisplayData(newData);
         });
     }
 }

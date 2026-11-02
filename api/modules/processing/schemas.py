@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class FrameInput(BaseModel):
@@ -16,6 +16,9 @@ class QueuedFrame(BaseModel):
     connection_id: UUID
     frame: FrameInput
     received_at: float
+    generation: int = 0
+    observed_at: float | None = None
+    recording_id: str | None = None
 
 
 class FrameMeasurements(BaseModel):
@@ -32,15 +35,19 @@ class FrameMeasurements(BaseModel):
     present: bool | None = None
     processing_ms: float = 0.0
     error: str | None = None
+    sensor_score: float | None = None
+    sensor_model_version: str | None = None
+    sensor_unavailable_reason: str | None = None
 
 
 class SensorMeasurements(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
-    upper_cm: int
-    lower_mm: int
-    back_raw: int
-    desk_raw: int
+    drowsy: bool | None
     captured_at_ms: float
+    present: bool | None
+    score: float | None = None
+    model_version: str | None = None
+    unavailable_reason: str | None = None
 
 
 class DetectionSample(BaseModel):
@@ -73,6 +80,9 @@ class DrowsinessResult(BaseModel):
     minute: MinuteSummary
     processing_ms: float
     alert: bool
+    sensor_score: float | None = None
+    sensor_model_version: str | None = None
+    sensor_unavailable_reason: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -105,3 +115,51 @@ class ProcessingStatus(BaseModel):
     in_flight: bool
     detection: DrowsinessResult | None
     mqtt_alert_sent_recently: bool = False
+
+
+class RawTelemetry(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    schema_version: Literal[1]
+    boot_id: str = Field(min_length=1, max_length=64)
+    sequence: int = Field(ge=0)
+    uptime_ms: int = Field(ge=0)
+    upper_cm: int | None = Field(ge=0, le=1000)
+    lower_mm: int | None = Field(gt=0, lt=8000)
+    back_adc: int = Field(ge=0, le=4095)
+    desk_adc: int = Field(ge=0, le=4095)
+
+
+class StoredSample(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    received_at: float
+    telemetry: RawTelemetry
+
+
+class SensorUpdate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    received_at: float
+    sensors: dict[str, SensorMeasurements]
+
+
+class CameraObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    received_at: float
+    frame: FrameMeasurements
+    generation: int = 0
+    sensor_updates: list[SensorUpdate] = Field(default_factory=list)
+    sensors: dict[str, SensorMeasurements]
+
+
+class LiveTelemetry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    sample: StoredSample | None = None
+    age_seconds: float | None = None
+    active_recording: str | None = None
+    active_model: str | None = None
+    candidate_model: str | None = None
+    score: float | None = None
+    candidate_score: float | None = None
+    possible_drowsy: bool | None = None
+    present: bool | None = None
+    unavailable_reason: str | None = None
+    storage_ready: bool = False

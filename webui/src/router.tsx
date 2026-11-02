@@ -7,6 +7,7 @@ import {
 import { PublishPage } from '#/features/streaming/pages/PublishPage/PublishPage.tsx'
 import { validatePublishSearch } from '#/features/streaming/pages/PublishPage/utils/validatePublishSearch'
 import { NotFound } from '#/components/NotFound.tsx'
+import { CalibrationPage } from '#/features/calibration/pages/CalibrationPage/CalibrationPage'
 import { RootLayout } from './layouts/RootLayout.tsx'
 
 const rootRoute = createRootRoute({
@@ -28,7 +29,15 @@ const streamingRoute = createRoute({
 })
 
 export const router = createRouter({
-  routeTree: rootRoute.addChildren([indexRoute, streamingRoute]),
+  routeTree: rootRoute.addChildren([
+    indexRoute,
+    streamingRoute,
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/calibration',
+      component: CalibrationPage,
+    }),
+  ]),
   scrollRestoration: true,
 })
 

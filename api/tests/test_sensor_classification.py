@@ -1,8 +1,8 @@
 import pytest
 
-from modules.processing.schemas import SensorMeasurements
+from modules.processing.schemas import RawTelemetry
 from modules.processing.services.sensor_classification import (
-    classify_sensor_measurements,
+    classify_raw_telemetry,
 )
 
 EXPECTED = [
@@ -40,23 +40,26 @@ EXPECTED = [
 def test_original_truth_table(index: int) -> None:
     desk, remainder = divmod(index, 9)
     back, upper = divmod(remainder, 3)
-    reading = SensorMeasurements(
+    reading = RawTelemetry(
+        schema_version=1,
+        boot_id="test",
+        sequence=1,
+        uptime_ms=200,
         upper_cm=(3, 7, 12)[upper],
         lower_mm=150,
-        back_raw=(0, 1500, 3500)[back],
-        desk_raw=(500, 1500, 2500)[desk],
-        captured_at_ms=0.0,
+        back_adc=(0, 1500, 3500)[back],
+        desk_adc=(500, 1500, 2500)[desk],
     )
-    assert classify_sensor_measurements(reading) == (True, EXPECTED[index])
+    assert classify_raw_telemetry(reading, 0.0).drowsy == EXPECTED[index]
 
 
 @pytest.mark.parametrize(
     ("upper", "lower", "back", "desk", "present", "drowsy"),
     [
-        (7, -1, 1000, 1500, False, None),
+        (7, -1, 1000, 1500, None, None),
         (7, 300, 1000, 1500, False, None),
         (7, 299, 1000, 1500, True, True),
-        (-1, 150, 1000, 1500, True, False),
+        (-1, 150, 1000, 1500, True, None),
         (5, 150, 1000, 1500, True, False),
         (6, 150, 1000, 1500, True, True),
         (9, 150, 1000, 1500, True, True),
@@ -76,14 +79,18 @@ def test_sensor_boundaries(
     lower: int,
     back: int,
     desk: int,
-    present: bool,
+    present: bool | None,
     drowsy: bool | None,
 ) -> None:
-    reading = SensorMeasurements(
-        upper_cm=upper,
-        lower_mm=lower,
-        back_raw=back,
-        desk_raw=desk,
-        captured_at_ms=0.0,
+    reading = RawTelemetry(
+        schema_version=1,
+        boot_id="test",
+        sequence=1,
+        uptime_ms=200,
+        upper_cm=None if upper == -1 else upper,
+        lower_mm=None if lower == -1 else lower,
+        back_adc=back,
+        desk_adc=desk,
     )
-    assert classify_sensor_measurements(reading) == (present, drowsy)
+    result = classify_raw_telemetry(reading, 0.0)
+    assert (result.present, result.drowsy) == (present, drowsy)

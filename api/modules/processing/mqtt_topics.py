@@ -1,16 +1,8 @@
 import re
 
 STUDENT_DATA_TOPIC = "drowsy/stud/{seat_id}/data"
-STUDENT_DATA_TOPICS = (
-    STUDENT_DATA_TOPIC,
-    "drowsy/student{seat_id}/data",
-    "wakey/student{seat_id}/sensors",
-)
-STUDENT_DATA_SUBSCRIPTIONS = (
-    "drowsy/stud/+/data",
-    "drowsy/+/data",
-    "wakey/+/sensors",
-)
+STUDENT_DATA_TOPICS = (STUDENT_DATA_TOPIC,)
+STUDENT_DATA_SUBSCRIPTIONS = ("drowsy/stud/+/data",)
 STUDENT_RESULT_TOPIC = "drowsy/stud/{seat_id}/result"
 LECTURER_RESULT_TOPIC = "drowsy/lect/result"
 SEAT_PLACEHOLDER = "{seat_id}"

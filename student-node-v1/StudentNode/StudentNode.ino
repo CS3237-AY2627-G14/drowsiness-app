@@ -19,6 +19,13 @@
 
 // ---------- Settings to change ----------
 #include "config.h"
+#include <esp_random.h>
+const char *ssid = WIFI_SSID;
+const char *pass = WIFI_PASSWORD;
+const char *server = MQTT_URI;
+char bootId[33];
+uint32_t rawSequence = 0, previousUptime = 0;
+uint64_t uptimeEpoch = 0;
 
 #define BUZZER_PASSIVE 0  // 0 = kit "Active Buzzer", 1 = kit "Passive Buzzer"
 #define DEBUG 1           // 1 = print all sensor readings to Serial Monitor every 0.5 s, 0 = off
@@ -139,13 +146,19 @@ void printDebug() {
 
 void publishData() {
   if (!mqttClient.isConnected()) return;
-  StaticJsonDocument<256> doc;
-  doc["upper_cm"] = upperCm;
-  doc["lower_mm"] = lowerMm;
-  doc["back_raw"] = backValue;
-  doc["desk_raw"] = deskValue;
-  char json[128];
-  serializeJson(doc, json, sizeof(json));
+  uint32_t currentUptime = millis();
+  if (currentUptime < previousUptime) uptimeEpoch += (1ULL << 32);
+  previousUptime = currentUptime;
+  char upper[16], lower[16], json[320];
+  if (upperCm < 0) snprintf(upper, sizeof(upper), "null");
+  else snprintf(upper, sizeof(upper), "%d", upperCm);
+  if (lowerMm < 0) snprintf(lower, sizeof(lower), "null");
+  else snprintf(lower, sizeof(lower), "%d", lowerMm);
+  snprintf(json, sizeof(json),
+    "{\"schema_version\":1,\"boot_id\":\"%s\",\"sequence\":%lu,\"uptime_ms\":%llu,"
+    "\"upper_cm\":%s,\"lower_mm\":%s,\"back_adc\":%d,\"desk_adc\":%d}",
+    bootId, (unsigned long)rawSequence++,
+    (unsigned long long)(uptimeEpoch + currentUptime), upper, lower, backValue, deskValue);
   mqttClient.publish(dataTopic, json, 0, false);
 }
 
@@ -161,6 +174,7 @@ void readSensors() {
 
 void setup() {
   Serial.begin(115200);
+  snprintf(bootId, sizeof(bootId), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(US_TRIG_PIN, OUTPUT);

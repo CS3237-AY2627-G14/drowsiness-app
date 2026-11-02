@@ -9,6 +9,7 @@ ALLOWED_DEPENDENCIES: dict[str, set[str]] = {
     "streaming": {"sessions", "processing"},
     "devices": {"classrooms", "sessions"},
     "processing": set(),
+    "calibration": {"processing"},
 }
 
 
