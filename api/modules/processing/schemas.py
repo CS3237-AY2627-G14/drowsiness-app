@@ -1,7 +1,7 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class FrameInput(BaseModel):
@@ -16,11 +16,9 @@ class QueuedFrame(BaseModel):
     connection_id: UUID
     frame: FrameInput
     received_at: float
-    sensor: "SensorMeasurements | None" = None
     generation: int = 0
-    calibration_at: float | None = None
+    observed_at: float | None = None
     recording_id: str | None = None
-    comparisons: dict[str, "SensorMeasurements"] = {}
 
 
 class FrameMeasurements(BaseModel):
@@ -117,3 +115,51 @@ class ProcessingStatus(BaseModel):
     in_flight: bool
     detection: DrowsinessResult | None
     mqtt_alert_sent_recently: bool = False
+
+
+class RawTelemetry(BaseModel):
+    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
+    schema_version: Literal[1]
+    boot_id: str = Field(min_length=1, max_length=64)
+    sequence: int = Field(ge=0)
+    uptime_ms: int = Field(ge=0)
+    upper_cm: int | None = Field(ge=0, le=1000)
+    lower_mm: int | None = Field(gt=0, lt=8000)
+    back_adc: int = Field(ge=0, le=4095)
+    desk_adc: int = Field(ge=0, le=4095)
+
+
+class StoredSample(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    received_at: float
+    telemetry: RawTelemetry
+
+
+class SensorUpdate(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    received_at: float
+    sensors: dict[str, SensorMeasurements]
+
+
+class CameraObservation(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    received_at: float
+    frame: FrameMeasurements
+    generation: int = 0
+    sensor_updates: list[SensorUpdate] = Field(default_factory=list)
+    sensors: dict[str, SensorMeasurements]
+
+
+class LiveTelemetry(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    sample: StoredSample | None = None
+    age_seconds: float | None = None
+    active_recording: str | None = None
+    active_model: str | None = None
+    candidate_model: str | None = None
+    score: float | None = None
+    candidate_score: float | None = None
+    possible_drowsy: bool | None = None
+    present: bool | None = None
+    unavailable_reason: str | None = None
+    storage_ready: bool = False

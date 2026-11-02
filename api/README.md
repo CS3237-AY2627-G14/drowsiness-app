@@ -51,7 +51,7 @@ Windows browser to use its camera. WSL execution remains unverified.
 After `uv sync --locked`, initialize persistent calibration storage explicitly:
 
 ```text
-uv run python -m modules.processing.calibration init
+uv run python -m modules.calibration init
 ```
 
 Restart the API and open http://localhost:3000/calibration. The backend adds

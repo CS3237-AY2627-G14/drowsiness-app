@@ -2,26 +2,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from modules.processing.schemas import FrameMeasurements, SensorMeasurements
+from modules.processing.facade import CameraObservation, StoredSample
 
 Label = Literal["awake", "drowsy", "uncertain"]
-
-
-class RawTelemetry(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid", frozen=True)
-    schema_version: Literal[1]
-    boot_id: str = Field(min_length=1, max_length=64)
-    sequence: int = Field(ge=0)
-    uptime_ms: int = Field(ge=0)
-    upper_cm: int | None = Field(ge=0, le=1000)
-    lower_mm: int | None = Field(gt=0, lt=8000)
-    back_adc: int = Field(ge=0, le=4095)
-    desk_adc: int = Field(ge=0, le=4095)
-
-
-class StoredSample(BaseModel):
-    received_at: float
-    telemetry: RawTelemetry
 
 
 class RecordingRequest(BaseModel):
@@ -60,19 +43,6 @@ class RecordingDetail(BaseModel):
     observations: list["CameraObservation"] = Field(default_factory=list)
 
 
-class SensorUpdate(BaseModel):
-    received_at: float
-    sensors: dict[str, SensorMeasurements]
-
-
-class CameraObservation(BaseModel):
-    received_at: float
-    frame: FrameMeasurements
-    generation: int = 0
-    sensor_updates: list[SensorUpdate] = Field(default_factory=list)
-    sensors: dict[str, SensorMeasurements]
-
-
 class TrainingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     recording_ids: list[str] = Field(min_length=3)
@@ -89,17 +59,3 @@ class TrainingJob(BaseModel):
     created_at: float
     report: dict[str, Any] | None = None
     error: str | None = None
-
-
-class LiveTelemetry(BaseModel):
-    sample: StoredSample | None = None
-    age_seconds: float | None = None
-    active_recording: str | None = None
-    active_model: str | None = None
-    candidate_model: str | None = None
-    score: float | None = None
-    candidate_score: float | None = None
-    possible_drowsy: bool | None = None
-    present: bool | None = None
-    unavailable_reason: str | None = None
-    storage_ready: bool = False

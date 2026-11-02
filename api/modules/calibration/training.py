@@ -15,12 +15,13 @@ from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 from sklearn.tree import DecisionTreeClassifier
 
-from modules.processing.calibration.features import (
-    FEATURE_VERSION,
-    SensorWindow,
+from modules.calibration.schemas import RecordingDetail
+from modules.processing.facade import (
+    StoredSample,
+    advance_sensor_window,
     baseline_result,
+    extract_features,
 )
-from modules.processing.calibration.schemas import RecordingDetail
 
 
 @dataclass
@@ -37,10 +38,10 @@ class TrainingRows:
 def build_rows(details: list[RecordingDetail], presence_mm: int = 300) -> TrainingRows:
     rows = TrainingRows([], [], [], [], [], [])
     for detail in details:
-        window = SensorWindow()
+        window: tuple[StoredSample, ...] = ()
         previous_second = -1
         for sample in detail.samples:
-            window.add(sample)
+            window = advance_sensor_window(window, sample)
             second = int(sample.received_at)
             if second == previous_second:
                 continue
@@ -52,7 +53,7 @@ def build_rows(details: list[RecordingDetail], presence_mm: int = 300) -> Traini
                     and sample.received_at < interval.end
                 ):
                     rows.eligible_windows += 1
-                    features = window.features()
+                    features = extract_features(list(window))
                     if features is None or sample.telemetry.lower_mm is None:
                         break
                     if sample.telemetry.lower_mm >= presence_mm:
@@ -234,7 +235,7 @@ def train_model(
     snapshot = json.dumps([detail.model_dump() for detail in details], sort_keys=True)
     dataset_id = hashlib.sha256(snapshot.encode()).hexdigest()
     artifact = {
-        "feature_version": FEATURE_VERSION,
+        "feature_version": 1,
         "presence_mm": presence_mm,
         "estimator": estimator,
         "threshold": threshold,
@@ -249,7 +250,7 @@ def train_model(
         "selected": selected,
         "threshold": threshold,
         "dataset_id": dataset_id,
-        "feature_version": FEATURE_VERSION,
+        "feature_version": 1,
         "sklearn_version": sklearn.__version__,
         "python_version": platform.python_version(),
         "validation": candidates,
@@ -268,22 +269,3 @@ def train_model(
         else None,
         "provenance": "staged_posture",
     }
-
-
-def load_artifact(
-    directory: Path, model_id: str, presence_mm: int | None = None
-) -> dict[str, Any]:
-    if len(model_id) != 32 or any(
-        character not in "0123456789abcdef" for character in model_id
-    ):
-        raise ValueError("Invalid model identifier")
-    artifact: dict[str, Any] = joblib.load(directory / f"{model_id}.joblib")
-    if (
-        artifact["feature_version"] != FEATURE_VERSION
-        or artifact["sklearn_version"] != sklearn.__version__
-        or (presence_mm is not None and artifact.get("presence_mm") != presence_mm)
-    ):
-        raise ValueError(
-            "Model feature/library version mismatch; retrain with this installation"
-        )
-    return artifact

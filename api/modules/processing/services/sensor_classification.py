@@ -1,5 +1,4 @@
-from modules.processing.calibration.schemas import RawTelemetry
-from modules.processing.schemas import SensorMeasurements
+from modules.processing.schemas import RawTelemetry, SensorMeasurements
 
 # ---------- Placeholder thresholds: tune with sensor_test_4 ----------
 # upper distance below 6 cm (0-5)  -> Low (head near the chair top)

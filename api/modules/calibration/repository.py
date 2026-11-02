@@ -4,14 +4,13 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from modules.processing.calibration.schemas import (
-    CameraObservation,
+from modules.calibration.schemas import (
     LabelInterval,
     Recording,
     RecordingDetail,
-    StoredSample,
     TrainingJob,
 )
+from modules.processing.facade import CameraObservation, StoredSample
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;

@@ -40,7 +40,7 @@ through WSL2. From `api/`, copy `.env.example` to `.env` if absent, then run:
 
 ```text
 uv sync --locked
-uv run python -m modules.processing.calibration init
+uv run python -m modules.calibration init
 docker compose up -d
 uv run uvicorn main:app --host 0.0.0.0 --port 8000
 ```
@@ -212,7 +212,7 @@ If an incompatible/missing selected artifact prevents startup, stop the API and
 run this from `api/` to explicitly return to the legacy baseline, then restart:
 
 ```text
-uv run python -m modules.processing.calibration reset-selection
+uv run python -m modules.calibration reset-selection
 ```
 
 This clears only model selection; recordings, labels, and previous artifacts stay

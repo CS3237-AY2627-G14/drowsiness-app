@@ -3,7 +3,7 @@ from statistics import median
 
 import numpy as np
 
-from modules.processing.calibration.schemas import StoredSample
+from modules.processing.schemas import StoredSample
 
 FEATURE_VERSION = 1
 SENSORS = ("upper_cm", "lower_mm", "back_adc", "desk_adc")
@@ -57,16 +57,25 @@ class SensorWindow:
         self.samples.clear()
 
     def add(self, sample: StoredSample) -> None:
-        if self.samples:
-            previous = self.samples[-1]
-            if (
-                previous.telemetry.boot_id != sample.telemetry.boot_id
-                or sample.received_at - previous.received_at > 0.6
-            ):
-                self.clear()
-        self.samples.append(sample)
-        while self.samples and self.samples[0].received_at <= sample.received_at - 2:
-            self.samples.popleft()
+        self.samples = deque(advance_sensor_window(tuple(self.samples), sample))
 
     def features(self) -> list[float] | None:
         return extract_features(list(self.samples))
+
+
+def advance_sensor_window(
+    samples: tuple[StoredSample, ...], sample: StoredSample
+) -> tuple[StoredSample, ...]:
+    if samples and (
+        samples[-1].telemetry.boot_id != sample.telemetry.boot_id
+        or sample.received_at - samples[-1].received_at > 0.6
+    ):
+        samples = ()
+    return (
+        *tuple(
+            previous
+            for previous in samples
+            if previous.received_at > sample.received_at - 2
+        ),
+        sample,
+    )

@@ -1,6 +1,6 @@
 import pytest
 
-from modules.processing.calibration.schemas import RawTelemetry
+from modules.processing.schemas import RawTelemetry
 from modules.processing.services.sensor_classification import (
     classify_raw_telemetry,
 )

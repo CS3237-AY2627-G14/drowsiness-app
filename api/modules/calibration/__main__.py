@@ -2,7 +2,7 @@ import argparse
 import asyncio
 
 from core.config import Settings
-from modules.processing.calibration.repository import (
+from modules.calibration.repository import (
     CalibrationRepository,
     initialize_database,
 )

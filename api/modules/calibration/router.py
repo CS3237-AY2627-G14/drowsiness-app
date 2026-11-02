@@ -7,10 +7,9 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response, StreamingResponse
 
-from modules.processing.calibration.facade import CalibrationFacade
-from modules.processing.calibration.schemas import (
+from modules.calibration.facade import CalibrationFacade
+from modules.calibration.schemas import (
     LabelInterval,
-    LiveTelemetry,
     ModelRequest,
     Recording,
     RecordingDetail,
@@ -18,27 +17,32 @@ from modules.processing.calibration.schemas import (
     TrainingJob,
     TrainingRequest,
 )
+from modules.processing.facade import LiveTelemetry
 
 router = APIRouter(prefix="/api/calibration", tags=["calibration"])
 
 
-def get_processing(request: Request) -> CalibrationFacade:
+def get_calibration_facade(request: Request) -> CalibrationFacade:
     return request.app.state.calibration_facade  # type: ignore[no-any-return]
 
 
-Processing = Annotated[CalibrationFacade, Depends(get_processing)]
+Calibration = Annotated[CalibrationFacade, Depends(get_calibration_facade)]
 
 
 @router.get("/live")
-async def live(processing: Processing) -> LiveTelemetry:
-    return processing.live()
+async def get_live_telemetry(calibration_facade: Calibration) -> LiveTelemetry:
+    return calibration_facade.get_live_telemetry()
 
 
 @router.get("/events")
-async def events(request: Request, processing: Processing) -> StreamingResponse:
+async def events(
+    request: Request, calibration_facade: Calibration
+) -> StreamingResponse:
     async def stream() -> AsyncIterator[str]:
         while not await request.is_disconnected():
-            yield f"data: {processing.live().model_dump_json()}\n\n"
+            telemetry = calibration_facade.get_live_telemetry()
+            payload = telemetry.model_dump_json()
+            yield f"data: {payload}\n\n"
             await asyncio.sleep(0.5)
 
     return StreamingResponse(
@@ -49,35 +53,41 @@ async def events(request: Request, processing: Processing) -> StreamingResponse:
 
 
 @router.get("/recordings")
-async def recordings(processing: Processing) -> list[Recording]:
-    return await processing.list_recordings()
+async def recordings(calibration_facade: Calibration) -> list[Recording]:
+    return await calibration_facade.list_recordings()
 
 
 @router.post("/recordings", status_code=201)
-async def start_recording(body: RecordingRequest, processing: Processing) -> Recording:
-    return await processing.start_recording(body)
+async def start_recording(
+    body: RecordingRequest, calibration_facade: Calibration
+) -> Recording:
+    return await calibration_facade.start_recording(body)
 
 
 @router.post("/recordings/{recording_id}/stop")
-async def stop_recording(recording_id: str, processing: Processing) -> Recording:
-    return await processing.stop_recording(recording_id)
+async def stop_recording(
+    recording_id: str, calibration_facade: Calibration
+) -> Recording:
+    return await calibration_facade.stop_recording(recording_id)
 
 
 @router.get("/recordings/{recording_id}")
-async def detail(recording_id: str, processing: Processing) -> RecordingDetail:
-    return await processing.detail(recording_id)
+async def get_recording(
+    recording_id: str, calibration_facade: Calibration
+) -> RecordingDetail:
+    return await calibration_facade.get_recording(recording_id)
 
 
 @router.put("/recordings/{recording_id}/labels", status_code=204)
-async def label(
-    recording_id: str, body: list[LabelInterval], processing: Processing
+async def replace_labels(
+    recording_id: str, body: list[LabelInterval], calibration_facade: Calibration
 ) -> None:
-    await processing.label(recording_id, body)
+    await calibration_facade.replace_labels(recording_id, body)
 
 
 @router.get("/recordings/{recording_id}/export")
-async def export(recording_id: str, processing: Processing) -> Response:
-    data = await processing.detail(recording_id)
+async def export(recording_id: str, calibration_facade: Calibration) -> Response:
+    data = await calibration_facade.get_recording(recording_id)
     output = io.StringIO(newline="")
     writer = csv.writer(output)
     writer.writerow(
@@ -128,20 +138,24 @@ async def export(recording_id: str, processing: Processing) -> Response:
 
 
 @router.get("/models")
-async def models(processing: Processing) -> list[TrainingJob]:
-    return await processing.jobs()
+async def models(calibration_facade: Calibration) -> list[TrainingJob]:
+    return await calibration_facade.list_training_jobs()
 
 
 @router.post("/training", status_code=202)
-async def train(body: TrainingRequest, processing: Processing) -> TrainingJob:
-    return await processing.train(body.recording_ids)
+async def train_candidate(
+    body: TrainingRequest, calibration_facade: Calibration
+) -> TrainingJob:
+    return await calibration_facade.train_candidate(body.recording_ids)
 
 
 @router.post("/selection", status_code=204)
-async def activate(body: ModelRequest, processing: Processing) -> None:
-    await processing.activate(body.model_id)
+async def activate_model(body: ModelRequest, calibration_facade: Calibration) -> None:
+    await calibration_facade.activate_model(body.model_id)
 
 
 @router.get("/recordings/{recording_id}/rehearsal")
-async def rehearsal(recording_id: str, processing: Processing) -> dict[str, Any]:
-    return await processing.rehearsal(recording_id)
+async def get_rehearsal_report(
+    recording_id: str, calibration_facade: Calibration
+) -> dict[str, Any]:
+    return await calibration_facade.get_rehearsal_report(recording_id)

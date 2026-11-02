@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict
 
 from core.clock import MonotonicTimer, Timer
 from core.config import Settings
-from modules.processing.calibration.service import CalibrationService
 from modules.processing.exceptions import ProcessingException
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.inference.frame_predictor import FramePredictor
@@ -16,15 +15,21 @@ from modules.processing.publishing import (
     SeatStatusUpdate,
     StudentSeatStatus,
 )
+from modules.processing.recording import MeasurementRecorder
 from modules.processing.repositories.registry import ProcessingRegistry
 from modules.processing.schemas import (
     DetectionState,
     FrameInput,
     FrameMeasurements,
+    LiveTelemetry,
     ProcessingRecord,
     ProcessingStatus,
     QueuedFrame,
+    RawTelemetry,
     SensorMeasurements,
+)
+from modules.processing.services.sensor_classification_service import (
+    SensorClassificationService,
 )
 from modules.processing.utils.drowsiness_rules import (
     evaluate_measurements,
@@ -40,9 +45,7 @@ class SeatRow(BaseModel):
 
     model_config = ConfigDict(frozen=True, strict=True)
 
-    sensor: SensorMeasurements | None = None
-    sensor_drowsy: bool | None = None
-    present: bool | None = None
+    sensor_measurements: SensorMeasurements | None = None
     captured_at_ms: float | None = None
     received_at: float | None = None
     latest_camera: FrameMeasurements | None = None
@@ -60,7 +63,8 @@ class FrameProcessingService:
         settings: Settings,
         timer: Timer | None = None,
         status_publisher: SeatStatusPublisher | None = None,
-        calibration_service: CalibrationService | None = None,
+        sensor_classification_service: SensorClassificationService | None = None,
+        measurement_recorder: MeasurementRecorder | None = None,
     ) -> None:
         self._processing_registry = processing_registry
         self._frame_buffer = frame_buffer
@@ -68,7 +72,14 @@ class FrameProcessingService:
         self._settings = settings
         self._timer = timer if timer is not None else MonotonicTimer()
         self._status_publisher = status_publisher
-        self._calibration_service = calibration_service
+        self._sensor_classification_service = (
+            sensor_classification_service
+            if sensor_classification_service is not None
+            else SensorClassificationService(settings)
+        )
+        self._measurement_recorder = measurement_recorder
+        self._latest_telemetry: dict[int, RawTelemetry] = {}
+        self._retired_boots: dict[int, set[str]] = {}
         self._generation = 0
         self._connection_ids: set[UUID] = set()
         self._available = asyncio.Event()
@@ -98,6 +109,59 @@ class FrameProcessingService:
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+
+    async def submit_raw_telemetry(
+        self, telemetry: RawTelemetry, seat_id: int = 1
+    ) -> None:
+        if seat_id == 1 and self._sensor_classification_service is not None:
+            if not await self._sensor_classification_service.receive_telemetry(
+                telemetry
+            ):
+                return
+            evidence = self._sensor_classification_service.get_sensor_evidence()
+        else:
+            previous = self._latest_telemetry.get(seat_id)
+            retired = self._retired_boots.setdefault(seat_id, set())
+            if telemetry.boot_id in retired:
+                return
+            if previous is not None:
+                if previous.boot_id == telemetry.boot_id:
+                    if (
+                        telemetry.sequence <= previous.sequence
+                        or telemetry.uptime_ms <= previous.uptime_ms
+                    ):
+                        return
+                else:
+                    retired.add(previous.boot_id)
+            self._latest_telemetry[seat_id] = telemetry
+            from modules.processing.services.sensor_classification import (
+                classify_raw_telemetry,
+            )
+
+            evidence = classify_raw_telemetry(
+                telemetry, time.time_ns() / 1_000_000, self._settings.sensor_presence_mm
+            )
+        await self.submit_sensor_measurements(seat_id, evidence)
+
+        if seat_id == 1 and self._measurement_recorder is not None:
+            sample = self._sensor_classification_service.get_live_telemetry().sample
+            if sample is not None:
+                await self._measurement_recorder.record_sensor_sample(
+                    sample, self._sensor_classification_service.get_sensor_comparisons()
+                )
+
+    def get_live_telemetry(self) -> LiveTelemetry:
+        return self._sensor_classification_service.get_live_telemetry()
+
+    def get_sensor_evidence(self) -> SensorMeasurements:
+        return self._sensor_classification_service.get_sensor_evidence()
+
+    async def activate_sensor_model(self, model_id: str | None) -> None:
+        await self._sensor_classification_service.load_model(model_id)
+        await self.reset_sensor_history()
+
+    async def select_candidate_model(self, model_id: str) -> None:
+        await self._sensor_classification_service.load_model(model_id, candidate=True)
 
     async def open_connection(self, connection_id: UUID) -> None:
         if self._failed:
@@ -155,12 +219,7 @@ class FrameProcessingService:
             )
         return row.model_copy(
             update={
-                "sensor_drowsy": sensor_drowsy,
-                "sensor_score": measurements.score,
-                "sensor_model_version": measurements.model_version,
-                "sensor_unavailable_reason": measurements.unavailable_reason,
-                "present": present,
-                "sensor": measurements,
+                "sensor_measurements": measurements,
                 "captured_at_ms": measurements.captured_at_ms,
                 "received_at": received_at,
                 "detection_state": detection_state,
@@ -180,16 +239,18 @@ class FrameProcessingService:
     async def submit_frame(self, connection_id: UUID, frame: FrameInput) -> None:
         record = self._get_active_record(connection_id)
         received_at = self._timer.now()
-        calibration = self._calibration_service if record.seat_id == 1 else None
+        sensor_classifier = (
+            self._sensor_classification_service if record.seat_id == 1 else None
+        )
         work = QueuedFrame(
             connection_id=connection_id,
             frame=frame,
             received_at=received_at,
-            sensor=self._snapshot_sensor(record.seat_id),
             generation=self._generation if record.seat_id == 1 else -1,
-            calibration_at=calibration.now() if calibration else None,
-            recording_id=calibration.live().active_recording if calibration else None,
-            comparisons=calibration.comparisons() if calibration else {},
+            observed_at=sensor_classifier.now() if sensor_classifier else None,
+            recording_id=self._measurement_recorder.get_recording_id()
+            if self._measurement_recorder
+            else None,
         )
         was_replaced = self._frame_buffer.put_latest(work)
         updated_record = record.model_copy(
@@ -227,6 +288,8 @@ class FrameProcessingService:
         if seat_id is None or self._connection_by_seat.get(seat_id) != connection_id:
             return
         del self._connection_by_seat[seat_id]
+        if seat_id == 1 and self._measurement_recorder is not None:
+            self._measurement_recorder.reset_sensor_history()
         row = self._seat_rows.get(seat_id)
         if row is None or row.detection_state.detection is None:
             return
@@ -236,20 +299,26 @@ class FrameProcessingService:
         )
         self._publish_seat(seat_id, previous_drowsy, sensor_driven=False)
 
-    def _snapshot_sensor(self, seat_id: int | None) -> SensorMeasurements:
-        if seat_id == 1 and self._calibration_service is not None:
-            live = self._calibration_service.live()
-            if live.active_model is not None or live.sample is not None:
-                return self._calibration_service.evidence()
+    def _get_sensor_evidence(self, seat_id: int | None) -> SensorMeasurements:
         row = self._seat_rows.get(seat_id) if seat_id else None
+        if seat_id == 1:
+            live = self._sensor_classification_service.get_live_telemetry()
+            if live.active_model is not None or live.sample is not None:
+                if (
+                    row is None
+                    or row.received_at is None
+                    or self._timer.now() - row.received_at
+                    <= self._settings.mqtt_sensor_max_age_seconds
+                ):
+                    return self._sensor_classification_service.get_sensor_evidence()
         if (
             row
-            and row.sensor
+            and row.sensor_measurements
             and row.received_at is not None
             and self._timer.now() - row.received_at
             <= self._settings.mqtt_sensor_max_age_seconds
         ):
-            return row.sensor
+            return row.sensor_measurements
         return SensorMeasurements(
             drowsy=None,
             present=None,
@@ -259,6 +328,8 @@ class FrameProcessingService:
 
     async def reset_sensor_history(self) -> None:
         self._generation += 1
+        if self._measurement_recorder is not None:
+            self._measurement_recorder.reset_sensor_history()
         previous_drowsy = self._drowsy_seat_ids()
         self._seat_rows[1] = SeatRow()
         self._publish_seat(1, previous_drowsy, sensor_driven=False)
@@ -295,21 +366,21 @@ class FrameProcessingService:
                 if work is not None and work.generation in (-1, self._generation):
                     self._apply_frame_measurements(measurements)
                     if (
-                        self._calibration_service is not None
-                        and work.calibration_at is not None
+                        self._measurement_recorder is not None
+                        and work.observed_at is not None
+                        and self._processing_registry.get(measurements.connection_id)
+                        is not None
                     ):
-                        self._calibration_service.observe_camera(
+                        self._measurement_recorder.observe_camera(
                             work.recording_id,
-                            work.calibration_at,
+                            work.observed_at,
                             measurements,
-                            self._calibration_service.comparisons(),
+                            self._sensor_classification_service.get_sensor_comparisons(),
                             work.generation,
                         )
             self._available.set()
 
-    def _apply_frame_measurements(
-        self, measurements: FrameMeasurements, sensor: SensorMeasurements | None = None
-    ) -> None:
+    def _apply_frame_measurements(self, measurements: FrameMeasurements) -> None:
         record = self._processing_registry.get(measurements.connection_id)
         if record is None:
             return
@@ -339,7 +410,7 @@ class FrameProcessingService:
         self, seat_id: int, measurements: FrameMeasurements
     ) -> DetectionState:
         row = self._seat_rows.get(seat_id, SeatRow())
-        measured = self._with_fresh_sensor(row, measurements)
+        measured = self._with_fresh_sensor(seat_id, measurements)
         detection_state = evaluate_measurements(
             row.detection_state, measured, self._settings
         )
@@ -354,10 +425,9 @@ class FrameProcessingService:
         return detection_state
 
     def _with_fresh_sensor(
-        self, row: SeatRow, measurements: FrameMeasurements
+        self, seat_id: int, measurements: FrameMeasurements
     ) -> FrameMeasurements:
-        record = self._processing_registry.get(measurements.connection_id)
-        sensor = self._snapshot_sensor(record.seat_id if record else None)
+        sensor = self._get_sensor_evidence(seat_id)
         return measurements.model_copy(
             update={
                 "sensor_drowsy": sensor.drowsy,

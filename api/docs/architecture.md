@@ -11,6 +11,7 @@ wires the application together.
 | sessions | Authorization sessions and exclusive publisher ownership | Classrooms facade |
 | streaming | Live connections, frame admission, lifecycle and reporting | Sessions and processing facades |
 | processing | Frame and sensor processing, inference scheduling and detection history | None |
+| calibration | Recording, labels, training, evaluation and persisted model selection | Processing facade |
 | devices | Device login and seat assignment | Classrooms and sessions facades |
 
 Dependencies must stay acyclic.
@@ -80,12 +81,15 @@ record), and a connection (one publishing connection).
 
 ## Persistent sensor calibration
 
-Processing owns raw student1 telemetry, recording/label storage, temporal feature
-extraction, grouped validation, training jobs, and model selection. Its calibration
-router delegates through a calibration facade to services and a SQLite repository.
+Processing owns live telemetry, temporal features, loaded models, fusion and alerts.
+The sibling calibration module owns recording/label storage, grouped validation,
+training jobs and persisted model selection. Its router delegates through its
+facade to services and a SQLite repository. Calibration depends only on the
+processing facade; processing never imports calibration. Application wiring
+injects a typed MeasurementRecorder implemented by calibration RecordingService.
 The browser accesses HTTP/SSE endpoints under `/api/calibration`.
 
-Initialize SQLite separately with `python -m modules.processing.calibration init`.
+Initialize SQLite separately with `python -m modules.calibration init`.
 Startup only reads existing schema, recovers interrupted jobs/recordings, and
 loads the selected artifact. Rooms, authorization, and connections remain
 in memory; calibration recordings, revisions, snapshots, and model selection

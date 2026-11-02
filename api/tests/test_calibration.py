@@ -9,23 +9,20 @@ from pydantic import ValidationError
 
 from core.config import Settings
 from main import create_app
-from modules.processing.calibration.features import SensorWindow, baseline_result
-from modules.processing.calibration.repository import (
+from modules.calibration.recording_service import RecordingService
+from modules.calibration.repository import (
     CalibrationRepository,
     initialize_database,
 )
-from modules.processing.calibration.schemas import (
+from modules.calibration.schemas import (
     LabelInterval,
-    RawTelemetry,
     Recording,
     RecordingDetail,
     RecordingRequest,
-    StoredSample,
 )
-from modules.processing.calibration.service import CalibrationService
-from modules.processing.calibration.training import (
+from modules.calibration.service import CalibrationService
+from modules.calibration.training import (
     build_rows,
-    load_artifact,
     predict_scores,
     train_model,
     tune_threshold,
@@ -34,9 +31,42 @@ from modules.processing.facade import ProcessingFacade
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.mqtt_router import SensorMqttRouter
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
-from modules.processing.schemas import FrameInput, FrameMeasurements, SensorMeasurements
+from modules.processing.schemas import (
+    FrameInput,
+    FrameMeasurements,
+    RawTelemetry,
+    SensorMeasurements,
+    StoredSample,
+)
+from modules.processing.sensor_features import SensorWindow, baseline_result
+from modules.processing.sensor_models import load_artifact
 from modules.processing.services.frame_processing_service import FrameProcessingService
+from modules.processing.services.sensor_classification_service import (
+    SensorClassificationService,
+)
 from tests.helpers import FakeFramePredictor, MutableClock, fake_inference_runtime
+
+
+def build_calibration_service(
+    repository: CalibrationRepository,
+    settings: Settings,
+    clock: MutableClock | None = None,
+) -> CalibrationService:
+    settings = settings.model_copy(
+        update={"calibration_directory": repository.directory}
+    )
+    recording_service = RecordingService(repository, clock)
+    classifier = SensorClassificationService(settings, clock)
+    frames = FrameProcessingService(
+        InMemoryProcessingRegistry(),
+        FrameBuffer(),
+        FakeFramePredictor(),
+        settings,
+        sensor_classification_service=classifier,
+        measurement_recorder=recording_service,
+    )
+    facade = ProcessingFacade(frames)
+    return CalibrationService(repository, settings, facade, recording_service, clock)
 
 
 def raw(
@@ -155,7 +185,7 @@ def test_recording_deduplication_labels_persistence_and_recovery(
     async def run() -> None:
         clock = MutableClock()
         repository = CalibrationRepository(tmp_path)
-        service = CalibrationService(repository, Settings(), clock)
+        service = build_calibration_service(repository, Settings(), clock)
         await service.start()
         assert not service.ready
         assert not await asyncio.to_thread(repository.path.exists)
@@ -164,32 +194,34 @@ def test_recording_deduplication_labels_persistence_and_recovery(
         initialize_database(tmp_path)
         await service.start()
         recording = await service.start_recording(RecordingRequest(participant="a"))
-        await service.receive(raw())
-        await service.receive(raw())
+        await service._processing_facade.submit_raw_telemetry(raw())
+        await service._processing_facade.submit_raw_telemetry(raw())
         clock.current_time += timedelta(seconds=0.2)
-        await service.receive(raw(2))
+        await service._processing_facade.submit_raw_telemetry(raw(2))
         clock.current_time += timedelta(seconds=0.2)
-        await service.receive(raw(1, boot="new"))
-        await service.receive(raw(99))  # retired boot cannot return
-        detail = await service.detail(recording.id)
+        await service._processing_facade.submit_raw_telemetry(raw(1, boot="new"))
+        await service._processing_facade.submit_raw_telemetry(
+            raw(99)
+        )  # retired boot cannot return
+        detail = await service.get_recording(recording.id)
         assert len(detail.samples) == 3
         end = clock.now().timestamp()
         interval = LabelInterval(start=recording.started_at, end=end, label="awake")
-        await service.label(recording.id, [interval])
+        await service.replace_labels(recording.id, [interval])
         with pytest.raises(ValueError, match="overlap"):
-            await service.label(recording.id, [interval, interval])
-        await service.label(
+            await service.replace_labels(recording.id, [interval, interval])
+        await service.replace_labels(
             recording.id, [interval.model_copy(update={"label": "uncertain"})]
         )
         revisions = await repository.query("SELECT COUNT(*) FROM label_revisions")
         assert revisions[0][0] == 2
-        restarted = CalibrationService(repository, Settings(), clock)
+        restarted = build_calibration_service(repository, Settings(), clock)
         await restarted.start()
-        recovered = await restarted.detail(recording.id)
+        recovered = await restarted.get_recording(recording.id)
         assert recovered.recording.stopped_at is not None
         assert recovered.intervals[0].label == "uncertain"
         clock.current_time += timedelta(seconds=6)
-        assert service.evidence().drowsy is None
+        assert service._processing_facade.get_sensor_evidence().drowsy is None
 
     asyncio.run(run())
 
@@ -198,32 +230,40 @@ def test_background_training_activation_and_restart(tmp_path: Path) -> None:
     async def run() -> None:
         initialize_database(tmp_path)
         repository = CalibrationRepository(tmp_path)
-        service = CalibrationService(repository, Settings())
+        service = build_calibration_service(repository, Settings())
         await service.start()
         for index in range(3):
             detail = dataset(index)
             await repository.save_recording(detail.recording)
             await repository.add_samples(detail.recording.id, detail.samples)
             await repository.replace_labels(detail.recording.id, detail.intervals)
-        job = await service.train([f"recording-{index}" for index in range(3)])
-        assert job.status == "running" and service.live().active_model is None
-        await service.receive(raw())  # ingestion remains available during training
-        await service.stop()
-        assert (await service.jobs())[0].status == "complete"
-        await service.activate(job.id)
-        assert (
-            service.live().active_model == job.id and service.evidence().drowsy is None
+        job = await service.train_candidate(
+            [f"recording-{index}" for index in range(3)]
         )
-        restarted = CalibrationService(repository, Settings())
+        assert (
+            job.status == "running"
+            and service.get_live_telemetry().active_model is None
+        )
+        await service._processing_facade.submit_raw_telemetry(
+            raw()
+        )  # ingestion remains available during training
+        await service.stop()
+        assert (await service.list_training_jobs())[0].status == "complete"
+        await service.activate_model(job.id)
+        assert (
+            service.get_live_telemetry().active_model == job.id
+            and service._processing_facade.get_sensor_evidence().drowsy is None
+        )
+        restarted = build_calibration_service(repository, Settings())
         await restarted.start()
-        assert restarted.live().active_model == job.id
-        await restarted.activate(None)
+        assert restarted.get_live_telemetry().active_model == job.id
+        await restarted.activate_model(None)
         assert await repository.get_selection() is None
 
     asyncio.run(run())
 
 
-def test_legacy_unknown_invalidates_and_frames_snapshot_sensor_evidence() -> None:
+def test_legacy_unknown_invalidates_and_frames_get_sensor_evidence_evidence() -> None:
     async def run() -> None:
         buffer = FrameBuffer()
         frames = FrameProcessingService(
@@ -251,8 +291,8 @@ def test_legacy_unknown_invalidates_and_frames_snapshot_sensor_evidence() -> Non
             connection_id, FrameInput(frame_id=2, captured_at_ms=2.0, jpeg=b"jpeg")
         )
         batch = buffer.claim_batch(1)
-        assert batch[0].sensor is not None and batch[0].sensor.drowsy is None
-        assert batch[0].sensor.unavailable_reason == "legacy_no_result"
+        assert frames._get_sensor_evidence(1).drowsy is None
+        assert frames._get_sensor_evidence(1).unavailable_reason == "legacy_no_result"
         buffer.release_batch(batch)
         await frames.submit_sensor_measurements(
             1, SensorMeasurements(drowsy=True, present=True, captured_at_ms=9e15)
@@ -264,7 +304,7 @@ def test_legacy_unknown_invalidates_and_frames_snapshot_sensor_evidence() -> Non
         await frames.submit_sensor_measurements(
             1, SensorMeasurements(drowsy=False, present=True, captured_at_ms=9e15 + 1)
         )
-        assert batch[0].sensor is not None and batch[0].sensor.drowsy is True
+        assert frames._get_sensor_evidence(1).drowsy is False
         frames._apply_frame_measurements(
             FrameMeasurements(
                 connection_id=connection_id,
@@ -273,8 +313,9 @@ def test_legacy_unknown_invalidates_and_frames_snapshot_sensor_evidence() -> Non
                 left_ear=0.1,
                 right_ear=0.1,
             ),
-            batch[0].sensor,
         )
+        status = await frames.get_status(connection_id)
+        assert status.detection is not None and status.detection.sensor_drowsy is False
         generation = batch[0].generation
         await frames.reset_sensor_history()
         assert frames._generation != generation
@@ -321,7 +362,9 @@ def test_rehearsal_persists_counterfactual_alerts_without_images(
     async def run() -> None:
         initialize_database(tmp_path)
         clock = MutableClock()
-        service = CalibrationService(CalibrationRepository(tmp_path), Settings(), clock)
+        service = build_calibration_service(
+            CalibrationRepository(tmp_path), Settings(), clock
+        )
         await service.start()
         recording = await service.start_recording(
             RecordingRequest(participant="rehearsal")
@@ -332,7 +375,7 @@ def test_rehearsal_persists_counterfactual_alerts_without_images(
             positive = SensorMeasurements(
                 drowsy=True, present=True, captured_at_ms=timestamp * 1000
             )
-            service.observe_camera(
+            service._recording_service.observe_camera(
                 recording.id,
                 timestamp,
                 FrameMeasurements(
@@ -348,7 +391,7 @@ def test_rehearsal_persists_counterfactual_alerts_without_images(
             )
             clock.current_time += timedelta(seconds=1)
         await service.stop_recording(recording.id)
-        await service.label(
+        await service.replace_labels(
             recording.id,
             [
                 LabelInterval(
@@ -356,11 +399,13 @@ def test_rehearsal_persists_counterfactual_alerts_without_images(
                 )
             ],
         )
-        report = await service.rehearsal(recording.id)
+        report = await service.get_rehearsal_report(recording.id)
         assert report["camera_observations"] == 12
         assert report["comparisons"]["active"]["false_alert_activations"] == 1
         assert report["comparisons"]["candidate"]["false_alert_activations"] == 0
-        assert "jpeg" not in (await service.detail(recording.id)).model_dump_json()
+        assert (
+            "jpeg" not in (await service.get_recording(recording.id)).model_dump_json()
+        )
 
     asyncio.run(run())
 
@@ -373,41 +418,41 @@ def test_active_model_owns_raw_input_and_missing_echo_is_not_low(
     report = train_model([dataset(index) for index in range(3)], model_id, tmp_path)
 
     async def run() -> None:
-        from modules.processing.calibration.schemas import TrainingJob
+        from modules.calibration.schemas import TrainingJob
 
         repository = CalibrationRepository(tmp_path)
         await repository.save_job(
             TrainingJob(id=model_id, status="complete", created_at=0, report=report)
         )
         clock = MutableClock()
-        service = CalibrationService(repository, Settings(), clock)
+        service = build_calibration_service(repository, Settings(), clock)
         await service.start()
-        await service.activate(model_id)
+        await service.activate_model(model_id)
         frames = FrameProcessingService(
             InMemoryProcessingRegistry(),
             FrameBuffer(),
             FakeFramePredictor(),
             Settings(),
-            calibration_service=service,
+            sensor_classification_service=service._processing_facade._frame_processing_service._sensor_classification_service,
         )
-        facade = ProcessingFacade(frames, service)
+        facade = ProcessingFacade(frames)
         router = SensorMqttRouter(Settings(), facade, asyncio.Queue())
         for sequence in range(16):
             await router._handle_message(
                 "drowsy/stud/1/data", raw(sequence).model_dump_json().encode()
             )
             clock.current_time += timedelta(seconds=0.2)
-        assert service.evidence().drowsy is True
+        assert service._processing_facade.get_sensor_evidence().drowsy is True
         await router._handle_message(
             "drowsy/student1/data", b'{"drowsy":0,"present":1}'
         )
-        assert frames._snapshot_sensor(1).drowsy is True
+        assert frames._get_sensor_evidence(1).drowsy is True
         await router._handle_message("drowsy/student1/raw", b'{"schema_version":2}')
-        live = service.live()
+        live = service.get_live_telemetry()
         assert live.sample is not None
         assert live.sample.telemetry.sequence == 15
         clock.current_time += timedelta(seconds=6)
-        assert frames._snapshot_sensor(1).drowsy is None
+        assert frames._get_sensor_evidence(1).drowsy is None
         with pytest.raises(ValueError, match="mismatch"):
             load_artifact(tmp_path, model_id, 100)
 
@@ -422,7 +467,7 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
     async def run() -> None:
         clock = MutableClock()
         settings = Settings(calibration_directory=tmp_path)
-        calibration = CalibrationService(
+        calibration = build_calibration_service(
             CalibrationRepository(tmp_path), settings, clock
         )
         queue: asyncio.Queue[SeatStatusUpdate] = asyncio.Queue()
@@ -433,10 +478,10 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
             FrameBuffer(),
             FakeFramePredictor(),
             settings,
-            calibration_service=calibration,
+            sensor_classification_service=calibration._processing_facade._frame_processing_service._sensor_classification_service,
             status_publisher=publisher,
         )
-        facade = ProcessingFacade(frames, calibration)
+        facade = ProcessingFacade(frames)
         connection_id = uuid4()
         await frames.open_connection(connection_id)
         await frames.associate_seat(connection_id, 1)
@@ -470,5 +515,97 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
         assert publisher.get_snapshot()[0].drowsy_seats == ()
         record = registry.get(connection_id)
         assert record is not None and record.seat_id == 1
+
+    asyncio.run(run())
+
+
+def test_rehearsal_counts_sensor_alert_transitions_without_adding_observations() -> (
+    None
+):
+    from modules.calibration.rehearsal import summarize_rehearsal
+    from modules.processing.schemas import CameraObservation, SensorUpdate
+
+    connection_id = uuid4()
+    observations = []
+    for index in range(10):
+        evidence = SensorMeasurements(
+            drowsy=index < 4, present=True, captured_at_ms=float(index * 1000)
+        )
+        observations.append(
+            CameraObservation(
+                received_at=float(index),
+                frame=FrameMeasurements(
+                    connection_id=connection_id,
+                    frame_id=index + 1,
+                    captured_at_ms=float(index * 1000),
+                    left_ear=0.1,
+                    right_ear=0.1,
+                ),
+                sensors={"active": evidence},
+            )
+        )
+    last_sensor = observations[-1].sensors["active"]
+    observations[-1] = observations[-1].model_copy(
+        update={
+            "sensor_updates": [
+                SensorUpdate(
+                    received_at=9.2,
+                    sensors={"active": last_sensor.model_copy(update={"drowsy": True})},
+                ),
+                SensorUpdate(
+                    received_at=9.4,
+                    sensors={"active": last_sensor.model_copy(update={"drowsy": None})},
+                ),
+            ]
+        }
+    )
+    detail = RecordingDetail(
+        recording=Recording(
+            id="rehearsal", participant="test", started_at=0.0, stopped_at=20.0
+        ),
+        samples=[],
+        intervals=[LabelInterval(start=0.0, end=20.0, label="awake")],
+        observations=observations,
+    )
+    report = summarize_rehearsal(detail, Settings())
+    assert report["camera_observations"] == 10
+    assert report["comparisons"]["active"]["valid_observations"] == 9
+    assert report["comparisons"]["active"]["false_alert_activations"] == 1
+
+
+def test_disconnect_stops_recording_sensor_revisions_to_the_closed_stream(
+    tmp_path: Path,
+) -> None:
+    async def run() -> None:
+        initialize_database(tmp_path)
+        clock = MutableClock()
+        service = build_calibration_service(
+            CalibrationRepository(tmp_path), Settings(), clock
+        )
+        await service.start()
+        recording = await service.start_recording(RecordingRequest(participant="test"))
+        processing_facade = service._processing_facade
+        frame_processing_service = processing_facade._frame_processing_service
+        connection_id = uuid4()
+        await frame_processing_service.open_connection(connection_id)
+        await frame_processing_service.associate_seat(connection_id, 1)
+        await processing_facade.submit_raw_telemetry(raw())
+        evidence = processing_facade.get_sensor_evidence()
+        service._recording_service.observe_camera(
+            recording.id,
+            clock.now().timestamp(),
+            FrameMeasurements(
+                connection_id=connection_id, frame_id=1, captured_at_ms=0.0
+            ),
+            {"active": evidence},
+        )
+        await frame_processing_service.close_connection(connection_id)
+        clock.current_time += timedelta(seconds=0.2)
+        await processing_facade.submit_raw_telemetry(raw(2))
+        await service.stop_recording(recording.id)
+        detail = await service.get_recording(recording.id)
+        assert len(detail.observations) == 1
+        assert detail.observations[0].sensor_updates == []
+        await service.stop()
 
     asyncio.run(run())

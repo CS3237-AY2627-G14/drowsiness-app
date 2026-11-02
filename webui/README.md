@@ -28,7 +28,7 @@ in `.env.local` and add the exact HTTPS origin to the API's
 ## Sensor calibration
 
 Open http://localhost:3000/calibration after initializing API calibration storage
-with `uv run python -m modules.processing.calibration init` from `api/` and
+with `uv run python -m modules.calibration init` from `api/` and
 restarting the API. The page displays live sensor plots, occupancy, freshness,
 active/candidate scores, and model selection for student1/seat 1.
 

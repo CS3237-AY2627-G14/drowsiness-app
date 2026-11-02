@@ -2,9 +2,9 @@ from typing import Any
 from uuid import UUID
 
 from core.config import Settings
-from modules.processing.calibration.schemas import RecordingDetail
-from modules.processing.schemas import DetectionState
-from modules.processing.utils.drowsiness_rules import (
+from modules.calibration.schemas import RecordingDetail
+from modules.processing.facade import (
+    DetectionState,
     classify_frame,
     evaluate_measurements,
     reclassify_latest_sample,

@@ -21,7 +21,7 @@ Read `docs/architecture.md` before changing module boundaries.
 - Cross-module imports must target `modules.<name>.facade` exclusively. Re-export
   public immutable DTOs and errors there with explicit `__all__`.
 - Allowed dependencies: classrooms → none; sessions → classrooms;
-  streaming → sessions, processing; processing → none;
+  streaming → sessions, processing; processing → none; calibration → processing;
   devices → classrooms, sessions. Keep dependencies acyclic.
 - `core` cannot import business modules. Only application wiring and tests may
   import another module's implementation directly.

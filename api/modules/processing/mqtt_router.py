@@ -5,8 +5,7 @@ import aiomqtt
 from pydantic import ValidationError
 
 from core.config import Settings
-from modules.processing.calibration.schemas import RawTelemetry
-from modules.processing.facade import ProcessingFacade
+from modules.processing.facade import ProcessingFacade, RawTelemetry
 from modules.processing.mqtt_topics import (
     STUDENT_DATA_SUBSCRIPTIONS,
     parse_seat_id,
