@@ -11,6 +11,7 @@ wires the application together.
 | sessions | Authorization sessions and exclusive publisher ownership | Classrooms facade |
 | streaming | Live connections, frame admission, lifecycle and reporting | Sessions and processing facades |
 | processing | Frame and sensor processing, inference scheduling and detection history | None |
+| calibration | Recording, labels, training, evaluation and persisted model selection | Processing facade |
 | devices | Device login and seat assignment | Classrooms and sessions facades |
 
 Dependencies must stay acyclic.
@@ -64,7 +65,7 @@ record), and a connection (one publishing connection).
    Student nodes only acquire readings and execute per-seat alert commands.
    Fresh readings attach to camera samples; sensor updates may reclassify the
    latest sample without adding observations. Per-seat status and retained
-   lecturer seat lists coexist with the legacy hardware notification.
+   lecturer seat lists drive the student and lecturer firmware.
 3. **Monitor.** Each connection is checked for session expiry, processing health
    and idleness. Status reporting can be removed without affecting monitoring.
 4. **Disconnect.** Seat ownership is released, connection state is discarded, and
@@ -77,6 +78,39 @@ record), and a connection (one publishing connection).
 - Cleanup survives cancellation, so a seat is never left reserved.
 - Shutdown closes connections first, then stops inference scheduling, then stops
   the inference workers.
+
+## Persistent sensor calibration
+
+Processing owns live telemetry, temporal features, loaded models, fusion and alerts.
+The sibling calibration module owns recording/label storage, grouped validation,
+training jobs and persisted model selection. Its router delegates through its
+facade to services and a SQLite repository. Calibration depends only on the
+processing facade; processing never imports calibration. Application wiring
+injects a typed MeasurementRecorder implemented by calibration RecordingService.
+The browser accesses HTTP/SSE endpoints under `/api/calibration`.
+
+Initialize SQLite separately with `python -m modules.calibration init`.
+Startup only reads existing schema, recovers interrupted jobs/recordings, and
+loads the selected artifact. Rooms, authorization, and connections remain
+in memory; calibration recordings, revisions, snapshots, and model selection
+persist in the configured local data directory. Keep one API process.
+
+Raw telemetry contains all four readings plus boot identity, sequence, and uptime.
+Server receipt time aligns recordings and rehearsals. The same two-second feature
+extraction is used online and during training. Validation splits entire recordings,
+including preprocessing; reserved recordings never affect fitting or threshold
+selection. Training runs outside the event loop and never activates automatically.
+
+Before activation the corrected legacy rules remain available. After activation
+raw telemetry owns seat 1's gate, and missing evidence stays unknown. Current sensor evidence is applied after inference; new readings revise only
+the latest combined sample without adding observations. Activation clears sensor and
+detection history and invalidates outstanding results from the previous model
+generation while keeping publisher ownership.
+
+Rehearsal recording stores camera measurements and snapshots of active, legacy,
+and candidate gates, without images. Counterfactual replay uses the same fusion
+and rolling-alert rules; only the active live path publishes hardware alerts.
+See [the operator guide](../../docs/sensor-calibration.md).
 
 ## Frontend
 

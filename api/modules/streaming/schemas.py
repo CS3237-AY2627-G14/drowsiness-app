@@ -59,6 +59,9 @@ class DetectionSnapshot(BaseModel):
     minute: MinuteSummary
     alert: bool
     face_detected: bool
+    sensor_score: float | None = None
+    sensor_model_version: str | None = None
+    sensor_unavailable_reason: str | None = None
 
 
 class StreamResponse(BaseModel):

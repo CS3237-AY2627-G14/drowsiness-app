@@ -18,6 +18,9 @@ def build_stream_response(status: StreamStatus, diagnostics: bool) -> StreamResp
             minute=result.minute,
             alert=result.alert,
             face_detected=result.face_detected,
+            sensor_score=result.sensor_score,
+            sensor_model_version=result.sensor_model_version,
+            sensor_unavailable_reason=result.sensor_unavailable_reason,
         )
     return StreamResponse(
         detection=detection,

@@ -1,4 +1,4 @@
-from modules.processing.schemas import SensorMeasurements
+from modules.processing.schemas import RawTelemetry, SensorMeasurements
 
 # ---------- Placeholder thresholds: tune with sensor_test_4 ----------
 # upper distance below 6 cm (0-5)  -> Low (head near the chair top)
@@ -84,35 +84,23 @@ ROW_RESULT: tuple[bool | None, ...] = (
 )
 
 
-def classify_sensor_measurements(
-    measurements: SensorMeasurements,
-) -> tuple[bool, bool | None]:
-    present = 0 <= measurements.lower_mm < TOF_DETECT_MM
-    if not present:
-        return False, None
-    # no echo (-1) = Low
-    upper_level = classify_three_levels(
-        measurements.upper_cm, US_LOW_MAX_CM, US_MED_MAX_CM
+def classify_raw_telemetry(
+    telemetry: RawTelemetry, captured_at_ms: float, presence_mm: int = 300
+) -> SensorMeasurements:
+    present = None if telemetry.lower_mm is None else telemetry.lower_mm < presence_mm
+    drowsy = None
+    if present and telemetry.upper_cm is not None:
+        upper = classify_three_levels(telemetry.upper_cm, US_LOW_MAX_CM, US_MED_MAX_CM)
+        back = classify_three_levels(telemetry.back_adc, BACK_LOW_MAX, BACK_MED_MAX)
+        desk = 0 if telemetry.desk_adc < 1000 else 2 if telemetry.desk_adc > 2000 else 1
+        drowsy = ROW_RESULT[2 + desk * 9 + back * 3 + upper]
+    return SensorMeasurements(
+        drowsy=drowsy,
+        present=present,
+        captured_at_ms=captured_at_ms,
+        unavailable_reason=None if drowsy is not None else "sensor_no_result",
     )
-    back_level = classify_three_levels(
-        measurements.back_raw, BACK_LOW_MAX, BACK_MED_MAX
-    )
-    if measurements.desk_raw < DESK_BASE - DESK_TOLERANCE:
-        desk_level = 0
-    elif measurements.desk_raw > DESK_BASE + DESK_TOLERANCE:
-        desk_level = 2
-    else:
-        desk_level = 1
-    # Which row of the table the current readings match (1-28)
-    # Rows 2-28 go: desk (Lower, Close, Higher) -> backrest (Low, Medium, High)
-    # -> upper (Low, Medium, High)
-    row = 2 + desk_level * 9 + back_level * 3 + upper_level
-    return True, ROW_RESULT[row]
 
 
 def classify_three_levels(value: int, low_max: int, medium_max: int) -> int:
-    if value <= low_max:
-        return 0
-    if value <= medium_max:
-        return 1
-    return 2
+    return 0 if value <= low_max else 1 if value <= medium_max else 2

@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import uuid
 
 import aiomqtt
 
@@ -34,16 +35,21 @@ def parse_arguments() -> argparse.Namespace:
 
 async def publish_test_reading(arguments: argparse.Namespace) -> None:
     topic = build_student_data_topic(arguments.student)
+    boot_id = uuid.uuid4().hex
     async with aiomqtt.Client(
         hostname=arguments.host,
         port=arguments.port,
     ) as mqtt_client:
         for index in range(arguments.count):
             payload = {
-                "upper_cm": arguments.upper_cm,
-                "lower_mm": arguments.lower_mm,
-                "back_raw": arguments.back_raw,
-                "desk_raw": arguments.desk_raw,
+                "schema_version": 1,
+                "boot_id": boot_id,
+                "sequence": index,
+                "uptime_ms": int(index * arguments.interval * 1000),
+                "upper_cm": None if arguments.upper_cm < 0 else arguments.upper_cm,
+                "lower_mm": None if arguments.lower_mm < 0 else arguments.lower_mm,
+                "back_adc": arguments.back_raw,
+                "desk_adc": arguments.desk_raw,
             }
             encoded_payload = json.dumps(payload)
             await mqtt_client.publish(topic, encoded_payload, qos=1)

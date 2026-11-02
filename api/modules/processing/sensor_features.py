@@ -1,0 +1,81 @@
+from collections import deque
+from statistics import median
+
+import numpy as np
+
+from modules.processing.schemas import StoredSample
+
+FEATURE_VERSION = 1
+SENSORS = ("upper_cm", "lower_mm", "back_adc", "desk_adc")
+
+
+def extract_features(samples: list[StoredSample]) -> list[float] | None:
+    if len(samples) < 8 or samples[-1].received_at - samples[0].received_at < 1.4:
+        return None
+    if len({sample.telemetry.boot_id for sample in samples}) != 1:
+        return None
+    if any(
+        current.received_at - previous.received_at > 0.6
+        for previous, current in zip(samples, samples[1:], strict=False)
+    ):
+        return None
+    features: list[float] = []
+    for sensor in SENSORS:
+        values = [
+            value
+            for sample in samples
+            if (value := getattr(sample.telemetry, sensor)) is not None
+        ]
+        if sensor != "upper_cm" and len(values) != len(samples):
+            return None
+        features.extend(
+            [
+                float(median(values)) if values else float("nan"),
+                float(np.percentile(values, 75) - np.percentile(values, 25))
+                if values
+                else float("nan"),
+                float(values[-1] - values[0]) if values else float("nan"),
+                len(values) / len(samples),
+            ]
+        )
+    return features
+
+
+def baseline_result(sample: StoredSample, presence_mm: int = 300) -> bool | None:
+    from modules.processing.services.sensor_classification import classify_raw_telemetry
+
+    return classify_raw_telemetry(
+        sample.telemetry, sample.received_at * 1000, presence_mm
+    ).drowsy
+
+
+class SensorWindow:
+    def __init__(self) -> None:
+        self.samples: deque[StoredSample] = deque()
+
+    def clear(self) -> None:
+        self.samples.clear()
+
+    def add(self, sample: StoredSample) -> None:
+        self.samples = deque(advance_sensor_window(tuple(self.samples), sample))
+
+    def features(self) -> list[float] | None:
+        return extract_features(list(self.samples))
+
+
+def advance_sensor_window(
+    samples: tuple[StoredSample, ...], sample: StoredSample
+) -> tuple[StoredSample, ...]:
+    if samples and (
+        samples[-1].telemetry.boot_id != sample.telemetry.boot_id
+        or sample.received_at - samples[-1].received_at > 0.6
+    ):
+        samples = ()
+    return (
+        *tuple(
+            previous
+            for previous in samples
+            if previous.received_at > sample.received_at - 2
+        ),
+        sample,
+    )

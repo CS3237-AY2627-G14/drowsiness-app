@@ -1,4 +1,5 @@
 import asyncio
+import itertools
 import json
 from uuid import UUID, uuid4
 
@@ -31,6 +32,9 @@ class RecordingStatusPublisher:
     def __init__(self) -> None:
         self.updates: list[SeatStatusUpdate] = []
 
+    def get_last_alert_published_at(self, seat_id: int) -> float | None:
+        return None
+
     def publish(self, update: SeatStatusUpdate) -> None:
         self.updates.append(update)
 
@@ -55,8 +59,19 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
         await processing_service.associate_seat(connection_id, 1)
 
         await mqtt_router._handle_message(
-            "drowsy/student1/data",
-            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
+            "drowsy/stud/1/data",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "boot_id": "test",
+                    "sequence": 1,
+                    "uptime_ms": 200,
+                    "upper_cm": 7,
+                    "lower_mm": 150,
+                    "back_adc": 1000,
+                    "desk_adc": 1500,
+                }
+            ).encode(),
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -98,8 +113,19 @@ def test_firmware_sensor_topic_maps_readings_to_camera_result() -> None:
         await processing_service.associate_seat(connection_id, 1)
 
         await mqtt_router._handle_message(
-            "wakey/student1/sensors",
-            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
+            "drowsy/stud/1/data",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "boot_id": "test",
+                    "sequence": 2,
+                    "uptime_ms": 400,
+                    "upper_cm": 7,
+                    "lower_mm": 150,
+                    "back_adc": 1000,
+                    "desk_adc": 1500,
+                }
+            ).encode(),
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -140,8 +166,19 @@ def test_unoccupied_firmware_sensor_sample_is_not_counted() -> None:
         await processing_service.associate_seat(connection_id, 1)
 
         await mqtt_router._handle_message(
-            "wakey/student1/sensors",
-            b'{"upper_cm":7,"lower_mm":-1,"back_raw":1000,"desk_raw":1500}',
+            "drowsy/stud/1/data",
+            json.dumps(
+                {
+                    "upper_cm": 7,
+                    "lower_mm": None,
+                    "schema_version": 1,
+                    "boot_id": "test",
+                    "sequence": 3,
+                    "uptime_ms": 600,
+                    "back_adc": 1000,
+                    "desk_adc": 1500,
+                }
+            ).encode(),
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -157,7 +194,7 @@ def test_unoccupied_firmware_sensor_sample_is_not_counted() -> None:
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
         assert result.sensor_drowsy is None
-        assert result.present is False
+        assert result.present is None
         assert result.minute.valid_samples == 0
 
     asyncio.run(run())
@@ -181,8 +218,19 @@ def test_sensor_message_without_timestamp_uses_presence_for_classification() -> 
         await processing_service.associate_seat(connection_id, 1)
 
         await mqtt_router._handle_message(
-            "drowsy/student1/data",
-            b'{"upper_cm":7,"lower_mm":-1,"back_raw":1000,"desk_raw":1500}',
+            "drowsy/stud/1/data",
+            json.dumps(
+                {
+                    "upper_cm": 7,
+                    "lower_mm": None,
+                    "schema_version": 1,
+                    "boot_id": "test",
+                    "sequence": 4,
+                    "uptime_ms": 800,
+                    "back_adc": 1000,
+                    "desk_adc": 1500,
+                }
+            ).encode(),
         )
         processing_service._apply_frame_measurements(
             FrameMeasurements(
@@ -223,13 +271,24 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
 
         await mqtt_router._handle_message(
             "drowsy/student2/data",
-            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "boot_id": "test",
+                    "sequence": 5,
+                    "uptime_ms": 1000,
+                    "upper_cm": 7,
+                    "lower_mm": 150,
+                    "back_adc": 1000,
+                    "desk_adc": 1500,
+                }
+            ).encode(),
         )
         await mqtt_router._handle_message(
-            "drowsy/student1/data",
+            "drowsy/stud/1/data",
             b'{"drowsy": 2, "present": 1}',
         )
-        await mqtt_router._handle_message("drowsy/student1/data", b"not-json")
+        await mqtt_router._handle_message("drowsy/stud/1/data", b"not-json")
         processing_service._apply_frame_measurements(
             FrameMeasurements(
                 connection_id=connection_id,
@@ -269,8 +328,19 @@ def test_expired_sensor_measurements_make_camera_drowsiness_unavailable() -> Non
         await processing_service.open_connection(connection_id)
         await processing_service.associate_seat(connection_id, 1)
         await mqtt_router._handle_message(
-            "drowsy/student1/data",
-            b'{"upper_cm":7,"lower_mm":150,"back_raw":1000,"desk_raw":1500}',
+            "drowsy/stud/1/data",
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "boot_id": "test",
+                    "sequence": 6,
+                    "uptime_ms": 1200,
+                    "upper_cm": 7,
+                    "lower_mm": 150,
+                    "back_adc": 1000,
+                    "desk_adc": 1500,
+                }
+            ).encode(),
         )
         timer.current_time = 5.1
         processing_service._apply_frame_measurements(
@@ -314,13 +384,21 @@ def _runtime(
     return processing_service, mqtt_router, processing_registry
 
 
+_sequences = itertools.count(1)
+
+
 def _sensor_message(fsr: int, tof_mm: int, *, present: int = 1) -> bytes:
+    sequence = next(_sequences)
     return json.dumps(
         {
             "upper_cm": 7,
-            "lower_mm": 150 if present else -1,
-            "back_raw": fsr,
-            "desk_raw": 1500 if fsr else 0,
+            "lower_mm": 150 if present else None,
+            "schema_version": 1,
+            "boot_id": "test",
+            "sequence": sequence,
+            "uptime_ms": sequence * 200,
+            "back_adc": fsr,
+            "desk_adc": 1500 if fsr else 0,
         }
     ).encode()
 
@@ -399,7 +477,7 @@ def test_sensor_absence_reclassifies_latest_camera_sample(
         assert record.detection_state.detection.sensor_drowsy is (
             True if fsr and present else None
         )
-        assert record.detection_state.detection.present is bool(present)
+        assert record.detection_state.detection.present is (True if present else None)
         assert publisher.updates == [
             SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
         ]
@@ -554,7 +632,7 @@ def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
         await processing_service.open_connection(connection_id)
         await processing_service.associate_seat(connection_id, 1)
         measurements = SensorMeasurements(
-            upper_cm=7, lower_mm=150, back_raw=100, desk_raw=1500, captured_at_ms=2000.0
+            drowsy=True, present=True, captured_at_ms=2000.0
         )
         await processing_service.submit_sensor_measurements(1, measurements)
         processing_service._apply_frame_measurements(
@@ -564,7 +642,7 @@ def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
         publisher.updates.clear()
         timer.current_time = 1.0
         outdated_measurements = measurements.model_copy(
-            update={"desk_raw": 0, "captured_at_ms": timestamp_ms}
+            update={"desk_adc": 0, "captured_at_ms": timestamp_ms}
         )
 
         await processing_service.submit_sensor_measurements(1, outdated_measurements)
@@ -669,8 +747,8 @@ def test_topic_templates_match_the_sensor_pattern() -> None:
     assert result_topic == "drowsy/stud/12/result"
     assert subscription == "drowsy/stud/+/data"
     assert parsed_seat_id == 12
-    assert parse_seat_id("drowsy/student1/data") == 1
-    assert parse_seat_id("wakey/student1/sensors") == 1
+    assert parse_seat_id("drowsy/stud/1/data") == 1
+    assert parse_seat_id("drowsy/stud/1/data") == 1
 
 
 def test_status_update_uses_student_and_lecturer_topics() -> None:
