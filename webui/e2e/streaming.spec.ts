@@ -522,8 +522,7 @@ test('shows minute counts, updates the alert, and clears the summary on restart'
         captured_at_ms: 0,
         ear: 0.1,
         fatigue_probability: 0.9,
-        fsr_raw: 530,
-        tof_distance_mm: 129,
+        sensor_drowsy: true,
         present: true,
         minute: {
           valid_samples: 42,
@@ -545,18 +544,18 @@ test('shows minute counts, updates the alert, and clears the summary on restart'
     page.getByRole('heading', { name: 'Drowsiness detected' }),
   ).toBeVisible()
   await expect(results.getByText('Yes')).toBeVisible()
-  await expect(results.getByText('22 of 42 valid pictures')).toBeVisible()
+  await expect(results.getByText('22 of 42 valid')).toBeVisible()
   drowsyPictures = 20
   await expect(
     page.getByRole('heading', { name: 'Monitoring', exact: true }),
   ).toBeVisible()
-  await expect(results.getByText('20 of 42 valid pictures')).toBeVisible()
+  await expect(results.getByText('20 of 42 valid')).toBeVisible()
   await page.getByRole('button', { name: 'Stop', exact: true }).click()
   await page.getByRole('button', { name: 'Start camera' }).click()
-  await expect(results.getByText('20 of 42 valid pictures')).toHaveCount(0)
+  await expect(results.getByText('20 of 42 valid')).toHaveCount(0)
 })
 
-test('waits for enough valid pictures and does not invent observations between messages', async ({
+test('waits for enough valid and does not invent observations between messages', async ({
   page,
 }) => {
   let sentStatus = false
@@ -577,13 +576,12 @@ test('waits for enough valid pictures and does not invent observations between m
         captured_at_ms: 0,
         ear: 0.1,
         fatigue_probability: 0.9,
-        fsr_raw: 530,
-        tof_distance_mm: 129,
+        sensor_drowsy: true,
         present: false,
         minute: {
-          valid_samples: 10,
-          drowsy_samples: 10,
-          unavailable_samples: 50,
+          valid_samples: 9,
+          drowsy_samples: 9,
+          unavailable_samples: 51,
           window_seconds: 60,
         },
         alert: false,
@@ -599,9 +597,9 @@ test('waits for enough valid pictures and does not invent observations between m
     page.getByRole('heading', { name: 'Gathering observations' }),
   ).toBeVisible()
   const results = page.getByRole('region', { name: 'Detection results' })
-  await expect(results.getByText('10 of 10 valid pictures')).toBeVisible()
+  await expect(results.getByText('9 of 9 valid')).toBeVisible()
   await page.waitForTimeout(1500)
-  await expect(results.getByText('10 of 10 valid pictures')).toBeVisible()
+  await expect(results.getByText('9 of 9 valid')).toBeVisible()
   await expect(
     page.getByRole('heading', { name: 'Drowsiness detected' }),
   ).toHaveCount(0)
@@ -632,4 +630,96 @@ test('keeps emitting frames without receiving detection or diagnostic messages',
     page.getByRole('heading', { name: 'Waiting for detection' }),
   ).toBeVisible()
   await page.getByRole('button', { name: 'Stop', exact: true }).click()
+})
+
+test('selects a camera without overflowing controls and refreshes devices without switching an active preview', async ({
+  page,
+}) => {
+  await page.route('**/api/classrooms', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 101,
+          name: 'Room 101',
+          seats: [{ id: 1, room_id: 101, seat_number: 1 }],
+        },
+      ],
+    }),
+  )
+  await page.addInitScript(() => {
+    const mediaDevices = navigator.mediaDevices
+    const getUserMedia = mediaDevices.getUserMedia.bind(mediaDevices)
+    let connected = true
+    mediaDevices.enumerateDevices = async () =>
+      connected
+        ? [
+            {
+              kind: 'videoinput',
+              deviceId: 'remote-camera',
+              label: 'Integrated Full HD Camera (USB Video Device 1920x1080)',
+              groupId: '',
+              toJSON: () => ({}),
+            },
+          ]
+        : []
+    mediaDevices.getUserMedia = (constraints) => {
+      const video = constraints?.video as MediaTrackConstraints
+      if (
+        video.deviceId &&
+        JSON.stringify(video.deviceId) !==
+          JSON.stringify({ exact: 'remote-camera' })
+      )
+        return Promise.reject(new DOMException('Wrong camera', 'NotFoundError'))
+      document.documentElement.dataset.cameraId = JSON.stringify(video.deviceId)
+      return getUserMedia({ audio: false, video: true })
+    }
+    window.addEventListener('disconnect-test-camera', () => {
+      connected = false
+      mediaDevices.dispatchEvent(new Event('devicechange'))
+    })
+  })
+  await page.goto('/streaming')
+  const selector = page.getByLabel('Camera', { exact: true })
+  await expect(selector.locator('option')).toHaveCount(2)
+  for (const width of [320, 375, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1000 })
+    const layout = await page.evaluate(() => {
+      const sidebar = document.querySelector('aside')!
+      const sidebarBounds = sidebar.getBoundingClientRect()
+      const controls = sidebar.querySelectorAll('select, button, input')
+      return {
+        fitsViewport: document.documentElement.scrollWidth <= window.innerWidth,
+        controlsFitSidebar: Array.from(controls).every((control) => {
+          const bounds = control.getBoundingClientRect()
+          return (
+            bounds.left >= sidebarBounds.left &&
+            bounds.right <= sidebarBounds.right
+          )
+        }),
+      }
+    })
+    expect(layout).toEqual({ fitsViewport: true, controlsFitSidebar: true })
+  }
+  await selector.selectOption('remote-camera')
+  await page.getByRole('button', { name: 'Start camera' }).click()
+  await expect(page.getByRole('status')).toHaveText('Preview ready')
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-camera-id',
+    '{"exact":"remote-camera"}',
+  )
+  await expect(selector).toBeDisabled()
+  await page.evaluate(() =>
+    window.dispatchEvent(new Event('disconnect-test-camera')),
+  )
+  await expect(selector.locator('option:checked')).toHaveText(
+    'Selected camera unavailable',
+  )
+  await expect(page.getByRole('status')).toHaveText('Preview ready')
+  await page.getByRole('button', { name: 'Stop', exact: true }).click()
+  await expect(selector).toBeEnabled()
+  await selector.selectOption('')
+  await page
+    .getByRole('button', { name: 'Refresh cameras', exact: true })
+    .click()
+  await expect(selector.locator('option')).toHaveCount(1)
 })
