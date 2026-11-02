@@ -91,34 +91,41 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access. State is
-in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-The API subscribes to `drowsy/+/data` and `wakey/+/sensors`; topics named
-`drowsy/student<N>/data` or `wakey/student<N>/sensors` map readings to seat N.
-Messages are UTF-8 JSON with `present` encoded as `0` or `1` and `drowsy` as
-`0`, `1`, or `-1` (unknown). Unknown immediately clears the previous result. The
-API timestamps each message when it receives it and attaches fresh results to
-that seat's camera detections. The baseline ESP32 rules determine sensor drowsiness: when it
-reports drowsy, the combined sample is drowsy if the camera agrees or detects
-no face; a camera result showing an awake face overrides it. Unoccupied or
-stale sensor results do not count. Set `DROWSINESS_MQTT_ENABLED=false` to disable
-MQTT input and output, or override `DROWSINESS_MQTT_HOST` and
-`DROWSINESS_MQTT_PORT`. The subscriber and result publisher retry when the broker
-is unavailable. When the drowsiness alert turns on, the API publishes
-`{"id": "A1"}` to `drowsy/result` at QoS 1; `B1` will be added later. Camera
-uploads continue to use Socket.IO at `/api/socket.io` through Vite's API proxy.
+Student nodes publish versioned telemetry every 200 ms to
+`drowsy/stud/<seat_id>/data` (QoS 0, non-retained):
 
-For a local test publisher and the full sensor behavior details, see the
-[MQTT guide](../README.md#mqtt).
+```json
+{"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
+```
 
-The API also subscribes to `drowsy/student1/raw`, the permanent 5 Hz telemetry
-topic. It evaluates the corrected legacy rules from raw readings before model
-activation. After activation, only the learned raw-telemetry classification can
-set seat 1's sensor gate; stale or missing raw telemetry becomes unknown.
-Camera frames snapshot sensor evidence on admission, and model changes clear
-sensor buffers and rolling detection history. Camera thresholds and the rolling
-alert rule remain unchanged. Candidate rehearsal measurements do not publish
-hardware alerts and contain no images.
+Distances are centimetres and millimetres; invalid distances are `null`.
+ADC readings range from 0 to 4095. Boot identity, sequence and uptime reject old
+packets. Reflash all student nodes with this API; older payloads are unsupported.
+
+The API owns the corrected sensor truth table and learned seat 1 classifier.
+Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence
+(up to five seconds old) combines with camera measurements. Sensor-awake counts
+as awake; sensor-drowsy counts when the camera agrees or has no face measurements.
+An awake camera overrides a drowsy sensor. Missing evidence and unoccupied seats
+do not count. New sensor readings can revise the latest combined sample without
+adding observations. The rolling minute uses the latest picture per second and
+requires ten valid samples with at least half drowsy.
+
+Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
+Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
+publications occur at most once per second, except alert changes. The lecturer
+receives retained `{"drowsy_seats":[1,3]}` on `drowsy/lect/result`; empty lists clear
+its display. The old hardcoded A1 notification is removed. The UI publication
+indicator is per-seat and confirms broker publication, not hardware execution.
+
+Set `DROWSINESS_MQTT_ENABLED=false` to disable MQTT or configure
+`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. Connections retry broker failures
+and refresh current status after reconnect. Camera uploads use Socket.IO.
+
+See the [calibration guide](../docs/sensor-calibration.md) for recording, training, rehearsal,
+activation and rollback. Calibration data persists locally; live history remains
+in memory. Rehearsal is a one-second diagnostic, stores no images, and candidate
+comparisons do not trigger hardware alerts.
 
 ## Checks
 

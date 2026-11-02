@@ -16,6 +16,7 @@ from modules.processing.calibration.schemas import (
     Recording,
     RecordingDetail,
     RecordingRequest,
+    SensorUpdate,
     StoredSample,
     TrainingJob,
 )
@@ -53,6 +54,7 @@ class CalibrationService:
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._pending_observations: dict[int, CameraObservation] = {}
+        self._latest_observation: tuple[int, CameraObservation] | None = None
         self.ready = False
 
     def now(self) -> float:
@@ -109,10 +111,10 @@ class CalibrationService:
                 "uv run python -m modules.processing.calibration init; restart API"
             )
 
-    async def receive(self, telemetry: RawTelemetry) -> None:
+    async def receive(self, telemetry: RawTelemetry) -> bool:
         async with self._lock:
             if telemetry.boot_id in self._retired_boots:
-                return
+                return False
             if self._latest is not None:
                 previous = self._latest.telemetry
                 if telemetry.boot_id == previous.boot_id:
@@ -120,7 +122,7 @@ class CalibrationService:
                         telemetry.sequence <= previous.sequence
                         or telemetry.uptime_ms <= previous.uptime_ms
                     ):
-                        return
+                        return False
                 else:
                     self._retired_boots.add(previous.boot_id)
                     self._evidence = None
@@ -150,10 +152,11 @@ class CalibrationService:
                     if telemetry.lower_mm is not None
                     else "invalid_lower_distance",
                 )
-                return
+                return True
             if sample.received_at - self._last_prediction >= 1:
                 self._last_prediction = sample.received_at
                 self._predict(sample)
+            return True
 
     def _predict(self, sample: StoredSample) -> None:
         features = self._window.features()
@@ -254,17 +257,36 @@ class CalibrationService:
         received_at: float,
         frame: FrameMeasurements,
         comparisons: dict[str, SensorMeasurements],
+        generation: int = 0,
     ) -> None:
         if (
             self._active_recording is not None
             and self._active_recording.id == recording_id
             and frame.error is None
         ):
-            self._pending_observations[int(received_at)] = CameraObservation(
+            observation = CameraObservation(
+                generation=generation,
                 received_at=received_at,
                 frame=frame,
                 sensors=comparisons,
             )
+            self._latest_observation = (int(received_at), observation)
+            self._pending_observations[int(received_at)] = observation
+
+    def observe_sensor_update(self) -> None:
+        if self._active_recording is None or self._latest_observation is None:
+            return
+        second, observation = self._latest_observation
+        updated = observation.model_copy(
+            update={
+                "sensor_updates": [
+                    *observation.sensor_updates,
+                    SensorUpdate(received_at=self.now(), sensors=self.comparisons()),
+                ]
+            }
+        )
+        self._latest_observation = (second, updated)
+        self._pending_observations[second] = updated
 
     async def _flush_observations(self, recording_id: str) -> None:
         pending = self._pending_observations.copy()
@@ -289,6 +311,7 @@ class CalibrationService:
                 id=uuid4().hex, started_at=self.now(), **request.model_dump()
             )
             await self._calibration_repository.save_recording(recording)
+            self._latest_observation = None
             self._active_recording = recording
             return recording
 
@@ -393,6 +416,7 @@ class CalibrationService:
             await self._calibration_repository.save_selection(model_id)
             self._artifact = artifact
             self._active_model = model_id
+            self._latest_observation = None
             self._window.clear()
             self._evidence = None
             self._last_prediction = -1.0

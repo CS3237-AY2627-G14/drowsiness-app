@@ -1,19 +1,4 @@
-// CS3237 Team 14 "Wakey Wakey" - ESP32 student node (4 sensors)
-//
-// Does two jobs at the same time, using millis() timers:
-//   1. ALERT:  listens on drowsy/result for {"id":"A1"}.
-//              the LED blinks and the buzzer beeps for 5 seconds.
-//   2. RAW:    publishes all 4 sensors every 200 ms on drowsy/<NODE_ID>/raw.
-//   3. STATE:  works out legacy "present" and "drowsy"
-//              from the team's truth table, and publishes to drowsy/<NODE_ID>/data:
-//              {"present":1,"drowsy":0}     drowsy: 1 = drowsy, 0 = not drowsy, -1 = no result
-//              every second, and straight away when present or drowsy changes.
-//
-// The team's truth table is written out row by row in ROW_RESULT below (rows 1-28).
-//
-// Desk levels are measured against a fixed base (DESK_BASE = 1500).
-//
-// Libraries (Library Manager): ESP32MQTTClient, Adafruit_VL53L0X
+// Libraries (Library Manager): ESP32MQTTClient, Adafruit_VL53L0X, ArduinoJson
 // Board: DOIT ESP32 DEVKIT V1
 //
 // Wiring:
@@ -25,21 +10,22 @@
 //   FSR backrest   one leg -> 3.3 V, other leg -> GPIO 34 AND 10k -> GND
 //   FSR desk       one leg -> 3.3 V, other leg -> GPIO 35 AND 10k -> GND
 
+#include <ArduinoJson.h>
 #include <WiFi.h>
 #include <Wire.h>
 #include <Adafruit_VL53L0X.h>
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
-#include <algorithm>
-#include <cctype>
-#include <esp_random.h>
-#include "config.h"
 
 // ---------- Settings to change ----------
+#include "config.h"
+#include <esp_random.h>
 const char *ssid = WIFI_SSID;
 const char *pass = WIFI_PASSWORD;
-// Laptop running Mosquitto (ipconfig -> IPv4 Address). Same WiFi as the ESP32.
 const char *server = MQTT_URI;
+char bootId[33];
+uint32_t rawSequence = 0, previousUptime = 0;
+uint64_t uptimeEpoch = 0;
 
 #define BUZZER_PASSIVE 0  // 0 = kit "Active Buzzer", 1 = kit "Passive Buzzer"
 #define DEBUG 1           // 1 = print all sensor readings to Serial Monitor every 0.5 s, 0 = off
@@ -56,32 +42,13 @@ const int FSR_DESK_PIN = 35;
 const unsigned long ALERT_MS = 5000;   // alert lasts 5 s
 const unsigned long BLINK_MS = 1000;   // LED + buzzer switch every 1 s
 
-// ---------- Placeholder thresholds: tune with sensor_test_4 ----------
-const int US_LOW_MAX_CM = 5;       // upper distance below 6 cm (0-5)  -> Low (head near the chair top)
-const int US_MED_MAX_CM = 9;       // upper distance 6-9 cm            -> Medium, 10 cm and up -> High
-const int TOF_DETECT_MM = 300;     // lower distance < 300 mm  -> Detected (someone in the seat)
-const int BACK_LOW_MAX = 0;        // backrest FSR = 0         -> Low (not leaning)
-const int BACK_MED_MAX = 3000;     // backrest FSR 1-3000      -> Medium, above 3000 -> High
-const int DESK_BASE = 1500;        // desk FSR base value
-const int DESK_TOLERANCE = 500;    // 1000-2000 -> Close (light press), below 1000 -> Lower (not pressed),
-                                   // above 2000 -> Higher (heavy press)
-
 // ---------- Timing ----------
 const unsigned long SENSOR_MS = 200;    // read sensors every 200 ms
-const unsigned long PUBLISH_MS = 1000;  // publish every 1 s
+const unsigned long PUBLISH_MS = 200;
 const unsigned long DEBUG_MS = 500;     // debug print every 0.5 s
 
-const char alertTopic[] = "drowsy/result";
-const char dataTopic[] = "drowsy/" NODE_ID "/data";
-const char rawTopic[] = "drowsy/" NODE_ID "/raw";
-char bootId[33];
-uint32_t rawSequence = 0;
-uint32_t previousUptime = 0;
-uint64_t uptimeEpoch = 0;
-
-enum Level { LOW_L, MED_L, HIGH_L };
-enum DeskLevel { DESK_LOWER, DESK_CLOSE, DESK_HIGHER };
-enum State { NO_RESULT, NOT_DROWSY, DROWSY };
+const char alertTopic[] = "drowsy/stud/" SEAT_ID "/result";
+const char dataTopic[] = "drowsy/stud/" SEAT_ID "/data";
 
 ESP32MQTTClient mqttClient;
 Adafruit_VL53L0X tof;
@@ -101,9 +68,6 @@ int lowerMm = -1;    // ToF, -1 = out of range
 int backValue = 0;
 int deskValue = 0;
 
-// Outputs
-bool present = false;
-int row = 1;          // current truth-table row (1-28)
 unsigned long lastSensor = 0;
 unsigned long lastPublish = 0;
 unsigned long lastDebug = 0;
@@ -175,115 +139,12 @@ int readTofMm() {
   return -1;
 }
 
-Level threeLevels(int value, int lowMax, int medMax) {
-  if (value <= lowMax) return LOW_L;
-  if (value <= medMax) return MED_L;
-  return HIGH_L;
-}
-
-// ================= Truth table =================
-//
-//  #  | upper  | lower        | backrest | desk    | result
-// ----+--------+--------------+----------+---------+-----------
-//  1  | any    | Out-Of-Range | any      | any     | no result
-//  2  | Low    | Detected     | Low      | Lower   | no result
-//  3  | Medium | Detected     | Low      | Lower   | no result
-//  4  | High   | Detected     | Low      | Lower   | no result
-//  5  | Low    | Detected     | Medium   | Lower   | no result
-//  6  | Medium | Detected     | Medium   | Lower   | no result
-//  7  | High   | Detected     | Medium   | Lower   | no result
-//  8  | Low    | Detected     | High     | Lower   | no result
-//  9  | Medium | Detected     | High     | Lower   | no result
-//  10 | High   | Detected     | High     | Lower   | no result
-//  11 | Low    | Detected     | Low      | Close   | drowsy
-//  12 | Medium | Detected     | Low      | Close   | drowsy
-//  13 | High   | Detected     | Low      | Close   | drowsy
-//  14 | Low    | Detected     | Medium   | Close   | not drowsy
-//  15 | Medium | Detected     | Medium   | Close   | drowsy
-//  16 | High   | Detected     | Medium   | Close   | drowsy
-//  17 | Low    | Detected     | High     | Close   | not drowsy
-//  18 | Medium | Detected     | High     | Close   | drowsy
-//  19 | High   | Detected     | High     | Close   | drowsy
-//  20 | Low    | Detected     | Low      | Higher  | not drowsy
-//  21 | Medium | Detected     | Low      | Higher  | drowsy
-//  22 | High   | Detected     | Low      | Higher  | drowsy
-//  23 | Low    | Detected     | Medium   | Higher  | not drowsy
-//  24 | Medium | Detected     | Medium   | Higher  | drowsy
-//  25 | High   | Detected     | Medium   | Higher  | drowsyx
-//  26 | Low    | Detected     | High     | Higher  | not drowsy
-//  27 | Medium | Detected     | High     | Higher  | drowsy
-//  28 | High   | Detected     | High     | Higher  | drowsy
-//
-// Change a result here if the team changes the table.
-const State ROW_RESULT[29] = {
-  NO_RESULT,                              // (index 0 unused)
-  NO_RESULT,                              // 1
-  NO_RESULT, NO_RESULT, NO_RESULT,        // 2, 3, 4
-  NO_RESULT, NO_RESULT, NO_RESULT,        // 5, 6, 7
-  NO_RESULT, NO_RESULT, NO_RESULT,        // 8, 9, 10
-  DROWSY,     DROWSY, DROWSY,             // 11, 12, 13
-  NOT_DROWSY, DROWSY, DROWSY,             // 14, 15, 16
-  NOT_DROWSY, DROWSY, DROWSY,             // 17, 18, 19
-  NOT_DROWSY, DROWSY, DROWSY,             // 20, 21, 22
-  NOT_DROWSY, DROWSY, DROWSY,             // 23, 24, 25
-  NOT_DROWSY, DROWSY, DROWSY,             // 26, 27, 28
-};
-
-Level upperLevel() {
-  if (upperCm < 0) return HIGH_L;  // classification handles missing echoes separately
-  return threeLevels(upperCm, US_LOW_MAX_CM, US_MED_MAX_CM);
-}
-
-Level backLevel() {
-  return threeLevels(backValue, BACK_LOW_MAX, BACK_MED_MAX);
-}
-
-DeskLevel deskLevel() {
-  int change = deskValue - DESK_BASE;
-  if (change < -DESK_TOLERANCE) return DESK_LOWER;
-  if (change > DESK_TOLERANCE) return DESK_HIGHER;
-  return DESK_CLOSE;
-}
-
-bool tofDetected() {
-  return lowerMm >= 0 && lowerMm < TOF_DETECT_MM;
-}
-
-// Which row of the table the current readings match (1-28)
-int currentRow() {
-  if (!tofDetected()) return 1;
-  // Rows 2-28 go: desk (Lower, Close, Higher) -> backrest (Low, Medium, High) -> upper (Low, Medium, High)
-  return 2 + deskLevel() * 9 + backLevel() * 3 + upperLevel();
-}
-
-// 1 = drowsy, 0 = not drowsy, -1 = no result
-int drowsyValue(int r) {
-  if (upperCm < 0) return -1;
-  State st = ROW_RESULT[r];
-  if (st == DROWSY) return 1;
-  if (st == NOT_DROWSY) return 0;
-  return -1;
-}
-
-// Same line as the sensor_test_4 sketch, plus the final present/drowsy
 void printDebug() {
-  const char *levelNames[] = {"Low", "Medium", "High"};
-  const char *deskNames[] = {"Lower", "Close", "Higher"};
-  Serial.printf("upper=%4d cm (%-6s) | lower=%4d mm (%-12s) | back=%4d (%-6s) | desk=%4d (%-6s) | row %2d -> present=%d drowsy=%d\n",
-                upperCm, upperCm < 0 ? "Invalid" : levelNames[upperLevel()], lowerMm, tofDetected() ? "Detected" : "Out-Of-Range",
-                backValue, levelNames[backLevel()], deskValue, deskNames[deskLevel()],
-                row, present ? 1 : 0, drowsyValue(row));
+  Serial.printf("upper=%4d cm | lower=%4d mm | back=%4d | desk=%4d\n",
+                upperCm, lowerMm, backValue, deskValue);
 }
 
 void publishData() {
-  if (!mqttClient.isConnected()) return;
-  char json[32];
-  snprintf(json, sizeof(json), "{\"present\":%d,\"drowsy\":%d}",
-           present ? 1 : 0, drowsyValue(row));
-  mqttClient.publish(dataTopic, json, 0, false);
-}
-
-void publishRaw() {
   if (!mqttClient.isConnected()) return;
   uint32_t currentUptime = millis();
   if (currentUptime < previousUptime) uptimeEpoch += (1ULL << 32);
@@ -298,37 +159,22 @@ void publishRaw() {
     "\"upper_cm\":%s,\"lower_mm\":%s,\"back_adc\":%d,\"desk_adc\":%d}",
     bootId, (unsigned long)rawSequence++,
     (unsigned long long)(uptimeEpoch + currentUptime), upper, lower, backValue, deskValue);
-  mqttClient.publish(rawTopic, json, 0, false);
+  mqttClient.publish(dataTopic, json, 0, false);
 }
 
 void readSensors() {
-  int previousDrowsy = drowsyValue(row);
   upperCm = readUltrasonicCm();
   lowerMm = readTofMm();
   backValue = analogRead(FSR_BACK_PIN);
   deskValue = analogRead(FSR_DESK_PIN);
-  publishRaw();
 
-  // No delay: present and drowsy update on every reading (every 200 ms)
-  int newRow = currentRow();
-  bool newPresent = tofDetected();
-  bool changed = (newPresent != present) || (drowsyValue(newRow) != previousDrowsy);
-  present = newPresent;
-  row = newRow;
-
-  if (changed) {
-    publishData();          // tell the laptop straight away
-    lastPublish = millis();
-  }
 }
 
 // ================= setup / loop =================
 
 void setup() {
   Serial.begin(115200);
-  snprintf(bootId, sizeof(bootId), "%08lx%08lx%08lx%08lx",
-    (unsigned long)esp_random(), (unsigned long)esp_random(),
-    (unsigned long)esp_random(), (unsigned long)esp_random());
+  snprintf(bootId, sizeof(bootId), "%08lx%08lx", (unsigned long)esp_random(), (unsigned long)esp_random());
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(US_TRIG_PIN, OUTPUT);
@@ -339,7 +185,7 @@ void setup() {
 
   Wire.begin(21, 22);
   tofOk = tof.begin();
-  if (!tofOk) Serial.println("VL53L0X not found: present will stay 0");
+  if (!tofOk) Serial.println("VL53L0X not found: publishing invalid ToF readings");
 
   mqttClient.enableDebuggingMessages();
   mqttClient.setURI(server);
@@ -380,19 +226,15 @@ void loop() {
 void onMqttConnect(esp_mqtt_client_handle_t client) {
   if (mqttClient.isMyTurn(client)) {
     mqttClient.subscribe(alertTopic, [](const std::string &payload) {
-         Serial.printf("%s: %s\n", alertTopic, payload.c_str());
+      Serial.printf("%s: %s\n", alertTopic, payload.c_str());
+      StaticJsonDocument<256> doc;
+      DeserializationError error = deserializeJson(doc, payload.c_str());
+      if (error || !doc["drowsy"].is<bool>()) return;
 
-    std::string compact = payload;
-    compact.erase(
-        std::remove_if(compact.begin(), compact.end(), [](unsigned char c) {
-          return std::isspace(c);
-        }),
-        compact.end()
-    );
-
-    if (compact == "{\"id\":\"A1\"}") {
-      alertRequested = true;
-    }
+      static bool previousDrowsy = false;
+      bool drowsy = doc["drowsy"].as<bool>();
+      if (drowsy && !previousDrowsy) alertRequested = true;
+      previousDrowsy = drowsy;
     });
   }
 }

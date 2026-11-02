@@ -42,14 +42,11 @@ def extract_features(samples: list[StoredSample]) -> list[float] | None:
 
 
 def baseline_result(sample: StoredSample, presence_mm: int = 300) -> bool | None:
-    reading = sample.telemetry
-    if reading.lower_mm is None or reading.lower_mm >= presence_mm:
-        return None
-    if reading.upper_cm is None or reading.desk_adc < 1000:
-        return None
-    if reading.desk_adc <= 2000 and reading.back_adc == 0:
-        return True
-    return reading.upper_cm >= 6
+    from modules.processing.services.sensor_classification import classify_raw_telemetry
+
+    return classify_raw_telemetry(
+        sample.telemetry, sample.received_at * 1000, presence_mm
+    ).drowsy
 
 
 class SensorWindow:

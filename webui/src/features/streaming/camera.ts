@@ -16,7 +16,11 @@ export const createCamera = (onEnded: (error: Error) => void): Camera => {
     previous?.controller.abort()
   }
 
-  const open = ({ video, canvas }: CameraPreviewElements): Promise<void> => {
+  const open = ({
+    video,
+    canvas,
+    deviceId,
+  }: CameraPreviewElements): Promise<void> => {
     if (operation) return operation.promise
     const controller = new AbortController()
     const { signal } = controller
@@ -46,6 +50,7 @@ export const createCamera = (onEnded: (error: Error) => void): Camera => {
         canvas,
         signal,
         handleCameraEnded,
+        deviceId,
       )
       void opening.then(handleCameraOpened, handleCameraOpenFailed)
     })

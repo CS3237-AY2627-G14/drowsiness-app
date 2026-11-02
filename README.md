@@ -6,8 +6,9 @@ other project code as sibling directories, using the tooling suited to each one.
 | Project | Purpose | Tooling | Documentation |
 | --- | --- | --- | --- |
 | [`api/`](api/) | FastAPI backend, inference, and local MQTT broker configuration | Python 3.12, uv, Docker Compose | [API guide](api/README.md) |
+| [`student-node-v1/`](student-node-v1/) | Raw sensor acquisition and alert actuator | Arduino ESP32 | [Firmware guide](student-node-v1/README.md) |
+| [`lecturer-node-v1/`](lecturer-node-v1/) | ESP32 lecturer seat-list display and alerts | Arduino ESP32 | [Firmware guide](lecturer-node-v1/README.md) |
 | [`webui/`](webui/) | React camera client | Node.js 22.x (22.12+), npm, Vite | [Web client guide](webui/README.md) |
-| [`student-node-v1/`](student-node-v1/) | ESP32 sensors, raw telemetry, LED/buzzer | Arduino IDE / ESP32 toolchain | [Firmware guide](student-node-v1/README.md) |
 
 ## Get started
 
@@ -81,56 +82,41 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 
 ## MQTT
 
-Mosquitto publishes `127.0.0.1:1883` on the Docker host with anonymous local access.
-State is in memory and lost on restart. Use `docker compose logs -f mqtt` for logs.
-The API subscribes to `drowsy/+/data` and the firmware topic
-`wakey/+/sensors`; `student<N>` maps to seat N. Messages are UTF-8 JSON with
-`present` encoded as `0` or `1` and `drowsy` as `0`, `1`, or `-1` (unknown).
-Legacy ESP32 classifications remain the baseline; the API combines them with
-camera results and timestamps each message when received:
+Student nodes publish versioned telemetry every 200 ms to
+`drowsy/stud/<seat_id>/data` (QoS 0, non-retained):
 
 ```json
-{"drowsy": 1, "present": 1}
+{"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
 ```
 
-Updated firmware also sends versioned four-sensor packets every 200 ms on
-`drowsy/student1/raw`. Before activation, the API evaluates the legacy rules
-against raw readings when available. After activation, seat 1 uses its learned
-raw-telemetry model exclusively; legacy flags cannot overwrite it. Unknown
-packets clear the previous legacy classification. Calibration data persists
-in `api/.local/calibration`; rooms, sessions, and live detection history remain
-in memory. The [calibration guide](docs/sensor-calibration.md) defines the packet.
+Distances are centimetres and millimetres; invalid distances are `null`.
+ADC readings range from 0 to 4095. Boot identity, sequence and uptime reject old
+packets. Reflash all student nodes with this API; older payloads are unsupported.
 
-The latest sensor result is attached to that seat's camera detection when it
-is no more than five seconds old. A sample for an unoccupied seat or without a
-fresh sensor result is not counted. If the ESP32 reports drowsiness, the sample
-counts as drowsy when the camera also detects drowsiness or detects no face; a
-camera result showing an awake face overrides the ESP32 result. Set
-`DROWSINESS_MQTT_ENABLED=false` to disable MQTT input and output, or override
-`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT` to use another broker.
-The subscriber and result publisher retry if the broker is unavailable. When
-the drowsiness alert turns on, the API publishes `{"id": "A1"}` to
-`drowsy/result` at QoS 1. Seat identifiers are hardcoded for now; `B1` will be
-added later. Camera uploads continue to use Socket.IO at `/api/socket.io`
-through Vite's API proxy.
+The API owns the corrected sensor truth table and learned seat 1 classifier.
+Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence
+(up to five seconds old) combines with camera measurements. Sensor-awake counts
+as awake; sensor-drowsy counts when the camera agrees or has no face measurements.
+An awake camera overrides a drowsy sensor. Missing evidence and unoccupied seats
+do not count. New sensor readings can revise the latest combined sample without
+adding observations. The rolling minute uses the latest picture per second and
+requires ten valid samples with at least half drowsy.
 
-To send a test reading to the local broker while the API and frontend are
-running, start a camera stream for seat 1 and run this from `api/`:
+Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
+Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
+publications occur at most once per second, except alert changes. The lecturer
+receives retained `{"drowsy_seats":[1,3]}` on `drowsy/lect/result`; empty lists clear
+its display. The old hardcoded A1 notification is removed. The UI publication
+indicator is per-seat and confirms broker publication, not hardware execution.
 
-```bash
-cd api
-uv run python tests/test_publish_mqtt_test_data.py
-```
+Set `DROWSINESS_MQTT_ENABLED=false` to disable MQTT or configure
+`DROWSINESS_MQTT_HOST` and `DROWSINESS_MQTT_PORT`. Connections retry broker failures
+and refresh current status after reconnect. Camera uploads use Socket.IO.
 
-The script publishes ten fresh test results (one per second) to
-`wakey/student1/sensors`. Check the ESP32 result and the combined camera
-classification in live detection status. Change the node, drowsy/present flags,
-count, or interval with its options. For example, test an unoccupied seat:
-
-```bash
-cd api
-uv run python tests/test_publish_mqtt_test_data.py --student 2 --drowsy 0 --present 0
-```
+See the [calibration guide](docs/sensor-calibration.md) for recording, training, rehearsal,
+activation and rollback. Calibration data persists locally; live history remains
+in memory. Rehearsal is a one-second diagnostic, stores no images, and candidate
+comparisons do not trigger hardware alerts.
 
 ## Checks
 

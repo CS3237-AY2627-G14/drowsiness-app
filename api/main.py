@@ -1,5 +1,10 @@
+import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+)
 
 import socketio
 from fastapi import FastAPI, Request
@@ -21,8 +26,8 @@ from modules.processing.calibration.service import CalibrationService
 from modules.processing.facade import ProcessingFacade
 from modules.processing.inference import InferenceRuntime, create_inference_runtime
 from modules.processing.inference.frame_buffer import FrameBuffer
-from modules.processing.mqtt_result_publisher import MqttResultPublisher
 from modules.processing.mqtt_router import SensorMqttRouter
+from modules.processing.publishing import QueueSeatStatusPublisher, SeatStatusUpdate
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
 from modules.processing.services.frame_processing_service import FrameProcessingService
 from modules.sessions.facade import SessionsFacade
@@ -84,7 +89,7 @@ def build_streaming(
     socket_server: socketio.AsyncServer,
     sessions_facade: SessionsFacade,
     inference_runtime: InferenceRuntime,
-    mqtt_result_publisher: MqttResultPublisher,
+    status_publisher: QueueSeatStatusPublisher | None = None,
     calibration_service: CalibrationService | None = None,
 ) -> tuple[StreamingSocketRouter, FrameProcessingService, ProcessingFacade]:
     processing_registry = InMemoryProcessingRegistry()
@@ -94,7 +99,7 @@ def build_streaming(
         frame_buffer,
         inference_runtime.frame_predictor,
         configuration,
-        mqtt_result_publisher=mqtt_result_publisher,
+        status_publisher=status_publisher,
         calibration_service=calibration_service,
     )
     processing_facade = ProcessingFacade(frame_processing_service, calibration_service)
@@ -142,45 +147,42 @@ def create_app(
         calibration_service = CalibrationService(
             calibration_repository, configuration, application_clock
         )
-        await calibration_service.start()
-        async with inference_factory(configuration) as inference_runtime:
-            mqtt_result_publisher = MqttResultPublisher(configuration)
-            (
-                streaming_socket_router,
-                frame_processing_service,
-                processing_facade,
-            ) = build_streaming(
-                configuration,
-                socket_server,
-                sessions_facade,
-                inference_runtime,
-                mqtt_result_publisher,
-                calibration_service,
+        async with AsyncExitStack() as calibration_shutdown_stack:
+            calibration_shutdown_stack.push_async_callback(calibration_service.stop)
+            await calibration_service.start()
+            status_updates: asyncio.Queue[SeatStatusUpdate] = asyncio.Queue()
+            status_publisher = (
+                QueueSeatStatusPublisher(status_updates)
+                if configuration.mqtt_enabled
+                else None
             )
-            application.state.processing_facade = processing_facade
-            application.state.calibration_facade = CalibrationFacade(
-                calibration_service, frame_processing_service
-            )
-            sensor_mqtt_router = SensorMqttRouter(configuration, processing_facade)
-            try:
-                frame_processing_service.start(inference_runtime.workers)
-                sensor_mqtt_router.start()
-                mqtt_result_publisher.start()
-                yield
-            finally:
-                try:
-                    await sensor_mqtt_router.stop()
-                finally:
-                    try:
-                        await streaming_socket_router.stop()
-                    finally:
-                        try:
-                            await frame_processing_service.stop()
-                        finally:
-                            try:
-                                await mqtt_result_publisher.stop()
-                            finally:
-                                await calibration_service.stop()
+            async with inference_factory(configuration) as inference_runtime:
+                (
+                    streaming_socket_router,
+                    frame_processing_service,
+                    processing_facade,
+                ) = build_streaming(
+                    configuration,
+                    socket_server,
+                    sessions_facade,
+                    inference_runtime,
+                    status_publisher=status_publisher,
+                    calibration_service=calibration_service,
+                )
+                application.state.processing_facade = processing_facade
+                application.state.calibration_facade = CalibrationFacade(
+                    calibration_service, frame_processing_service
+                )
+                sensor_mqtt_router = SensorMqttRouter(
+                    configuration, processing_facade, status_updates, status_publisher
+                )
+                async with AsyncExitStack() as shutdown_stack:
+                    shutdown_stack.push_async_callback(frame_processing_service.stop)
+                    shutdown_stack.push_async_callback(streaming_socket_router.stop)
+                    shutdown_stack.push_async_callback(sensor_mqtt_router.stop)
+                    frame_processing_service.start(inference_runtime.workers)
+                    sensor_mqtt_router.start()
+                    yield
 
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)
     application.include_router(classrooms_router)

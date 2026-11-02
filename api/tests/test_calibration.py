@@ -238,9 +238,14 @@ def test_legacy_unknown_invalidates_and_frames_snapshot_sensor_evidence() -> Non
         await frames.submit_frame(
             connection_id, FrameInput(frame_id=1, captured_at_ms=1.0, jpeg=b"jpeg")
         )
-        router = SensorMqttRouter(Settings(), ProcessingFacade(frames))
-        await router._handle_message(
-            "drowsy/student1/data", b'{"drowsy":-1,"present":1}'
+        await frames.submit_sensor_measurements(
+            1,
+            SensorMeasurements(
+                drowsy=None,
+                present=True,
+                captured_at_ms=2.0,
+                unavailable_reason="legacy_no_result",
+            ),
         )
         await frames.submit_frame(
             connection_id, FrameInput(frame_id=2, captured_at_ms=2.0, jpeg=b"jpeg")
@@ -386,10 +391,10 @@ def test_active_model_owns_raw_input_and_missing_echo_is_not_low(
             calibration_service=service,
         )
         facade = ProcessingFacade(frames, service)
-        router = SensorMqttRouter(Settings(), facade)
+        router = SensorMqttRouter(Settings(), facade, asyncio.Queue())
         for sequence in range(16):
             await router._handle_message(
-                "drowsy/student1/raw", raw(sequence).model_dump_json().encode()
+                "drowsy/stud/1/data", raw(sequence).model_dump_json().encode()
             )
             clock.current_time += timedelta(seconds=0.2)
         assert service.evidence().drowsy is True
@@ -405,5 +410,65 @@ def test_active_model_owns_raw_input_and_missing_echo_is_not_low(
         assert frames._snapshot_sensor(1).drowsy is None
         with pytest.raises(ValueError, match="mismatch"):
             load_artifact(tmp_path, model_id, 100)
+
+    asyncio.run(run())
+
+
+def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
+    tmp_path: Path,
+) -> None:
+    from modules.processing.publishing import QueueSeatStatusPublisher, SeatStatusUpdate
+
+    async def run() -> None:
+        clock = MutableClock()
+        settings = Settings(calibration_directory=tmp_path)
+        calibration = CalibrationService(
+            CalibrationRepository(tmp_path), settings, clock
+        )
+        queue: asyncio.Queue[SeatStatusUpdate] = asyncio.Queue()
+        publisher = QueueSeatStatusPublisher(queue)
+        registry = InMemoryProcessingRegistry()
+        frames = FrameProcessingService(
+            registry,
+            FrameBuffer(),
+            FakeFramePredictor(),
+            settings,
+            calibration_service=calibration,
+            status_publisher=publisher,
+        )
+        facade = ProcessingFacade(frames, calibration)
+        connection_id = uuid4()
+        await frames.open_connection(connection_id)
+        await frames.associate_seat(connection_id, 1)
+        await facade.submit_raw_telemetry(raw())
+        for index in range(10):
+            frames._apply_frame_measurements(
+                FrameMeasurements(
+                    connection_id=connection_id,
+                    frame_id=index + 1,
+                    captured_at_ms=float(index * 1000),
+                    left_ear=0.1,
+                    right_ear=0.1,
+                )
+            )
+        status = await frames.get_status(connection_id)
+        assert status.detection is not None and status.detection.alert
+        clock.current_time += timedelta(seconds=0.2)
+        absent = raw(2).model_copy(update={"lower_mm": 400})
+        await facade.submit_raw_telemetry(absent)
+        status = await frames.get_status(connection_id)
+        assert status.processed_frames == 10
+        assert status.detection is not None
+        assert status.detection.present is False
+        assert status.detection.minute.valid_samples == 9
+        assert not status.detection.alert
+        # Duplicate/retired evidence cannot restore occupancy.
+        await facade.submit_raw_telemetry(raw())
+        assert (await frames.get_status(connection_id)).detection == status.detection
+        await frames.reset_sensor_history()
+        assert (await frames.get_status(connection_id)).detection is None
+        assert publisher.get_snapshot()[0].drowsy_seats == ()
+        record = registry.get(connection_id)
+        assert record is not None and record.seat_id == 1
 
     asyncio.run(run())

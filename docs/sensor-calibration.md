@@ -12,15 +12,15 @@ establish accuracy for actual physiological drowsiness.
 
 Open `student-node-v1/StudentNode/StudentNode.ino` in Arduino IDE. Install the
 ESP32 board package, select **DOIT ESP32 DEVKIT V1**, and install
-**ESP32MQTTClient** and **Adafruit VL53L0X** with their dependencies.
+**ESP32MQTTClient**, **ArduinoJson v6**, and **Adafruit VL53L0X** with their dependencies.
 
 Copy `config.example.h` to `config.h` in the same sketch folder. Fill in Wi-Fi
 credentials and the MQTT URI of the API computer, for example
-`mqtt://192.168.1.100:1883`. Keep `NODE_ID` as `student1`. The private `config.h`
+`mqtt://192.168.1.100:1883`. Set `SEAT_ID` to `"1"`. The private `config.h`
 is ignored by Git. Upload normally and open Serial Monitor at 115200 baud.
 Hardware wiring is assumed complete and correct.
 
-The node publishes one packet every 200 ms to `drowsy/student1/raw`:
+The node publishes one packet every 200 ms to `drowsy/stud/1/data`:
 
 ```json
 {"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
@@ -31,8 +31,7 @@ Distances are centimetres and millimetres respectively; pressures are raw
 uses QoS 0 and is not retained. Boot identity and sequence handle duplicate and
 out-of-order messages. Device uptime is not an epoch timestamp.
 
-Legacy `drowsy/student1/data` output remains available. `drowsy:-1` means unknown;
-the API clears the previous classification instead of discarding that update.
+The API and all nodes must be updated together. Summary-only packets are unsupported.
 
 ## 2. Install and initialize
 
@@ -161,16 +160,16 @@ Existing camera connections and seat ownership remain intact.
 Before first activation, the corrected legacy truth table is the baseline.
 After activation, raw telemetry owns seat 1's sensor classification: legacy
 packets cannot overwrite it. Missing or stale raw telemetry produces unknown
-evidence rather than silently falling back. Sensor evidence is attached when
-the camera frame arrives, not after inference completes.
+evidence rather than silently falling back. Current sensor evidence is combined when inference completes; new sensor
+readings can revise the latest combined sample without adding observations.
 
 A sample counts as drowsy only when occupied and the sensor gate passes, plus
 either CNN fatigue probability ≥0.65, both EARs <0.21, or no usable face in a
 successfully processed frame. Sensor-awake suppresses the sample; unknown
 evidence and unoccupied seats do not count. Camera disconnects do not create
 no-face samples. An alert requires ≥10 valid seconds and ≥50% drowsy in the
-rolling minute. Its off-to-on transition publishes `{"id":"A1"}` to
-`drowsy/result`, QoS 1, for the existing LED/buzzer behavior.
+rolling minute. Per-seat alert status publishes to `drowsy/stud/1/result`, QoS 1, and the
+retained lecturer list on `drowsy/lect/result` tracks all active seats.
 
 For a correction, record the failing posture, adjust labels where necessary,
 select old plus new development recordings, and train again. Dataset snapshots

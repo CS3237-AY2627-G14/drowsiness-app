@@ -3,4 +3,4 @@
 #define WIFI_SSID "your-wifi"
 #define WIFI_PASSWORD "your-password"
 #define MQTT_URI "mqtt://192.168.1.100:1883"
-#define NODE_ID "student1"
+#define SEAT_ID "1"

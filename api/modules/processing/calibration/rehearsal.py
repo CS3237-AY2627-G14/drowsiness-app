@@ -7,6 +7,7 @@ from modules.processing.schemas import DetectionState
 from modules.processing.utils.drowsiness_rules import (
     classify_frame,
     evaluate_measurements,
+    reclassify_latest_sample,
 )
 
 
@@ -20,7 +21,7 @@ def summarize_rehearsal(detail: RecordingDetail, settings: Settings) -> dict[str
         false_alerts = 0
         onsets: list[float] = []
         models: set[str] = set()
-        previous_source: tuple[UUID, str | None] | None = None
+        previous_source: tuple[UUID, str | None, int] | None = None
         valid_observations = 0
         for observation in detail.observations:
             sensor = observation.sensors.get(name)
@@ -28,7 +29,11 @@ def summarize_rehearsal(detail: RecordingDetail, settings: Settings) -> dict[str
                 continue
             if sensor.model_version:
                 models.add(sensor.model_version)
-            source = (observation.frame.connection_id, sensor.model_version)
+            source = (
+                observation.frame.connection_id,
+                sensor.model_version,
+                observation.generation,
+            )
             if source != previous_source:
                 state = DetectionState()
                 previous_source = source
@@ -50,6 +55,31 @@ def summarize_rehearsal(detail: RecordingDetail, settings: Settings) -> dict[str
                     for item in detail.intervals
                 ):
                     false_alerts += 1
+            for update in observation.sensor_updates:
+                revised_sensor = update.sensors.get(name)
+                if revised_sensor is None:
+                    continue
+                previous_alert = state.detection.alert if state.detection else False
+                revised = frame.model_copy(
+                    update={
+                        "sensor_drowsy": revised_sensor.drowsy,
+                        "present": revised_sensor.present,
+                    }
+                )
+                previous_valid = classify_frame(frame, settings) is not None
+                valid_observations += int(
+                    classify_frame(revised, settings) is not None
+                ) - int(previous_valid)
+                frame = revised
+                state = reclassify_latest_sample(state, revised, settings)
+                if state.detection and state.detection.alert and not previous_alert:
+                    onsets.append(update.received_at)
+                    if any(
+                        item.label == "awake"
+                        and item.start <= update.received_at < item.end
+                        for item in detail.intervals
+                    ):
+                        false_alerts += 1
         latencies = [
             next(
                 (
@@ -76,7 +106,8 @@ def summarize_rehearsal(detail: RecordingDetail, settings: Settings) -> dict[str
         "awake_minutes": awake_seconds / 60,
         "comparisons": results,
         "note": (
-            "Replayed one observation per server receipt second. "
+            "Replayed one observation per server receipt second with sensor updates. "
+            "This diagnostic is not an exact live trace. "
             "Missing latencies mean no new alert in that episode. No images are stored."
         ),
     }

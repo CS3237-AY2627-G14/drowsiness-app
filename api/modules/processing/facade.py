@@ -1,3 +1,4 @@
+import time
 from uuid import UUID
 
 from modules.processing.calibration.schemas import RawTelemetry
@@ -31,11 +32,40 @@ class ProcessingFacade:
     ) -> None:
         self._frame_processing_service = frame_processing_service
         self._calibration_service = calibration_service
+        self._latest_telemetry: dict[int, RawTelemetry] = {}
+        self._retired_boots: dict[int, set[str]] = {}
 
-    async def submit_raw_telemetry(self, telemetry: RawTelemetry) -> None:
-        if self._calibration_service is None:
-            raise RuntimeError("Calibration unavailable")
-        await self._calibration_service.receive(telemetry)
+    async def submit_raw_telemetry(
+        self, telemetry: RawTelemetry, seat_id: int = 1
+    ) -> None:
+        if seat_id == 1 and self._calibration_service is not None:
+            if not await self._calibration_service.receive(telemetry):
+                return
+            evidence = self._calibration_service.evidence()
+            self._calibration_service.observe_sensor_update()
+        else:
+            previous = self._latest_telemetry.get(seat_id)
+            retired = self._retired_boots.setdefault(seat_id, set())
+            if telemetry.boot_id in retired:
+                return
+            if previous is not None:
+                if previous.boot_id == telemetry.boot_id:
+                    if (
+                        telemetry.sequence <= previous.sequence
+                        or telemetry.uptime_ms <= previous.uptime_ms
+                    ):
+                        return
+                else:
+                    retired.add(previous.boot_id)
+            self._latest_telemetry[seat_id] = telemetry
+            from modules.processing.services.sensor_classification import (
+                classify_raw_telemetry,
+            )
+
+            evidence = classify_raw_telemetry(telemetry, time.time_ns() / 1_000_000)
+        await self._frame_processing_service.submit_sensor_measurements(
+            seat_id, evidence
+        )
 
     async def open_connection(self, connection_id: UUID) -> None:
         await self._frame_processing_service.open_connection(connection_id)

@@ -60,9 +60,16 @@ class RecordingDetail(BaseModel):
     observations: list["CameraObservation"] = Field(default_factory=list)
 
 
+class SensorUpdate(BaseModel):
+    received_at: float
+    sensors: dict[str, SensorMeasurements]
+
+
 class CameraObservation(BaseModel):
     received_at: float
     frame: FrameMeasurements
+    generation: int = 0
+    sensor_updates: list[SensorUpdate] = Field(default_factory=list)
     sensors: dict[str, SensorMeasurements]
 
 

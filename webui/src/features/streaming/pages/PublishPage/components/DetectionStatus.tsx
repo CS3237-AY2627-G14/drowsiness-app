@@ -101,11 +101,11 @@ export const DetectionStatus = ({
       <p className="mt-4 text-xs text-[var(--sea-ink-soft)]">
         One picture per second counts toward the minute. An alert needs at least
         10 valid pictures, with half or more showing signs of drowsiness.
-        Missing sensor readings and unoccupied seats do not count. An ESP32
-        drowsy result is counted as drowsy when the camera also detects
-        drowsiness or no face is detected; a detected awake face overrides the
-        sensor gate. The MQTT indicator reflects a successful publish in the
-        last 10 seconds.
+        Missing sensor readings and unoccupied seats do not count. A
+        backend-derived sensor drowsy result is counted as drowsy when the
+        camera also detects drowsiness or no face is detected; a detected awake
+        face overrides the sensor gate. The MQTT indicator reflects this seat’s
+        successful alert publication to the broker in the last 10 seconds.
       </p>
       <a className="text-sm underline" href="/calibration">
         Open sensor calibration

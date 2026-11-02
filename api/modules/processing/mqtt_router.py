@@ -1,32 +1,37 @@
 import asyncio
-import json
 import logging
-import re
-import time
 
 import aiomqtt
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
 from core.config import Settings
 from modules.processing.calibration.schemas import RawTelemetry
-from modules.processing.facade import ProcessingFacade, SensorMeasurements
-
-logger = logging.getLogger(__name__)
-SENSOR_TOPIC_PATTERN = re.compile(
-    r"(?:drowsy/student([1-9]\d*)/data|wakey/student([1-9]\d*)/sensors)"
+from modules.processing.facade import ProcessingFacade
+from modules.processing.mqtt_topics import (
+    STUDENT_DATA_SUBSCRIPTIONS,
+    parse_seat_id,
+)
+from modules.processing.publishing import (
+    QueueSeatStatusPublisher,
+    SeatStatusUpdate,
+    build_mqtt_publications,
 )
 
-
-class MqttSensorPayload(BaseModel):
-    model_config = ConfigDict(strict=True, extra="forbid")
-    drowsy: int = Field(ge=-1, le=1)
-    present: int = Field(ge=0, le=1)
+logger = logging.getLogger(__name__)
 
 
 class SensorMqttRouter:
-    def __init__(self, settings: Settings, processing_facade: ProcessingFacade) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        processing_facade: ProcessingFacade,
+        status_updates: asyncio.Queue[SeatStatusUpdate],
+        status_publisher: QueueSeatStatusPublisher | None = None,
+    ) -> None:
         self._settings = settings
         self._processing_facade = processing_facade
+        self._status_updates = status_updates
+        self._status_publisher = status_publisher
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -58,12 +63,13 @@ class SensorMqttRouter:
                     hostname=self._settings.mqtt_host,
                     port=self._settings.mqtt_port,
                 ) as mqtt_client:
-                    await mqtt_client.subscribe("drowsy/+/data")
-                    await mqtt_client.subscribe("wakey/+/sensors")
-                    await mqtt_client.subscribe("drowsy/student1/raw")
-                    async for message in mqtt_client.messages:
-                        await self._handle_message(message.topic.value, message.payload)
-            except aiomqtt.MqttError as error:
+                    for subscription in STUDENT_DATA_SUBSCRIPTIONS:
+                        await mqtt_client.subscribe(subscription)
+                    async with asyncio.TaskGroup() as task_group:
+                        task_group.create_task(self._receive_messages(mqtt_client))
+                        task_group.create_task(self._publish_updates(mqtt_client))
+            except* aiomqtt.MqttError as error_group:
+                error = error_group.exceptions[0]
                 logger.warning(
                     "MQTT connection failed for %s:%d: %s; retrying in 5 seconds",
                     self._settings.mqtt_host,
@@ -72,22 +78,51 @@ class SensorMqttRouter:
                 )
                 await asyncio.sleep(5)
 
+    async def _receive_messages(self, mqtt_client: aiomqtt.Client) -> None:
+        async for message in mqtt_client.messages:
+            await self._handle_message(message.topic.value, message.payload)
+
+    async def _publish_updates(self, mqtt_client: aiomqtt.Client) -> None:
+        if self._status_publisher is not None:
+            while not self._status_updates.empty():
+                self._status_updates.get_nowait()
+            for update in self._status_publisher.get_snapshot():
+                await self._publish_update(mqtt_client, update)
+        while True:
+            update = await self._status_updates.get()
+            students = {}
+            lecturer_seats = update.drowsy_seats
+            if update.student is not None:
+                students[update.student.seat_id] = update.student
+            while not self._status_updates.empty():
+                update = self._status_updates.get_nowait()
+                if update.student is not None:
+                    students[update.student.seat_id] = update.student
+                if update.drowsy_seats is not None:
+                    lecturer_seats = update.drowsy_seats
+            for student in students.values():
+                await self._publish_update(
+                    mqtt_client, SeatStatusUpdate(student=student)
+                )
+            if lecturer_seats is not None:
+                await self._publish_update(
+                    mqtt_client, SeatStatusUpdate(drowsy_seats=lecturer_seats)
+                )
+
+    async def _publish_update(
+        self, mqtt_client: aiomqtt.Client, update: SeatStatusUpdate
+    ) -> None:
+        for publication in build_mqtt_publications(update):
+            await mqtt_client.publish(
+                publication.topic, publication.payload, qos=1, retain=publication.retain
+            )
+        if update.student is not None and self._status_publisher is not None:
+            self._status_publisher.record_publication(update.student)
+
     async def _handle_message(self, topic: str, payload: bytes) -> None:
-        if topic == "drowsy/student1/raw":
-            if len(payload) > 1024:
-                return
-            try:
-                raw = RawTelemetry.model_validate_json(payload)
-            except ValidationError:
-                logger.warning("Ignoring invalid raw telemetry")
-                return
-            await self._processing_facade.submit_raw_telemetry(raw)
+        seat_id = parse_seat_id(topic)
+        if seat_id is None:
             return
-        topic_match = SENSOR_TOPIC_PATTERN.fullmatch(topic)
-        if topic_match is None:
-            logger.warning("Ignoring MQTT message on unsupported topic")
-            return
-        seat_id = int(topic_match.group(1) or topic_match.group(2))
         if seat_id > self._settings.demo_seat_count:
             logger.warning(
                 "Ignoring MQTT message for unknown student seat_id=%d", seat_id
@@ -97,30 +132,8 @@ class SensorMqttRouter:
             logger.warning("Ignoring oversized MQTT sensor message seat_id=%d", seat_id)
             return
         try:
-            payload_data = json.loads(payload)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning("Ignoring invalid MQTT JSON payload seat_id=%d", seat_id)
+            telemetry = RawTelemetry.model_validate_json(payload)
+        except ValidationError:
+            logger.warning("Ignoring invalid raw telemetry seat_id=%d", seat_id)
             return
-        try:
-            sensor_payload = MqttSensorPayload.model_validate(payload_data)
-        except ValidationError as error:
-            field_errors = "; ".join(
-                f"{'.'.join(str(part) for part in detail['loc']) or 'payload'}: "
-                f"{detail['type']}"
-                for detail in error.errors()
-            )
-            logger.warning(
-                "Ignoring invalid MQTT sensor fields seat_id=%d: %s",
-                seat_id,
-                field_errors,
-            )
-            return
-        measurements = SensorMeasurements(
-            drowsy=None if sensor_payload.drowsy == -1 else sensor_payload.drowsy == 1,
-            captured_at_ms=time.time_ns() / 1_000_000,
-            present=sensor_payload.present == 1,
-            unavailable_reason="legacy_no_result"
-            if sensor_payload.drowsy == -1
-            else None,
-        )
-        await self._processing_facade.submit_sensor_measurements(seat_id, measurements)
+        await self._processing_facade.submit_raw_telemetry(telemetry, seat_id)
