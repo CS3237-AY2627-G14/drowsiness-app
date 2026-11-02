@@ -124,14 +124,14 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
             }
 
             const char *id = doc["id"];
-            if (id == nullptr || strlen(id) <= 5)
+            if (id == nullptr || strlen(id) == 0 || strlen(id) > 5)
             {
                 log_i("JSON does not accept char more than 5");
                 return;
             }
 
             portENTER_CRITICAL(&idMux);
-            memcpy(pendingId, id, sizeof(pendingId)); // pendingId must be char[10]
+            snprintf(pendingId, sizeof(pendingId), "%s", id);
             alarmRequested = true;
             portEXIT_CRITICAL(&idMux);
         });

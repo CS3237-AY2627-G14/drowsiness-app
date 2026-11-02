@@ -522,8 +522,7 @@ test('shows minute counts, updates the alert, and clears the summary on restart'
         captured_at_ms: 0,
         ear: 0.1,
         fatigue_probability: 0.9,
-        fsr_raw: 530,
-        tof_distance_mm: 129,
+        sensor_drowsy: true,
         present: true,
         minute: {
           valid_samples: 42,
@@ -545,18 +544,18 @@ test('shows minute counts, updates the alert, and clears the summary on restart'
     page.getByRole('heading', { name: 'Drowsiness detected' }),
   ).toBeVisible()
   await expect(results.getByText('Yes')).toBeVisible()
-  await expect(results.getByText('22 of 42 valid pictures')).toBeVisible()
+  await expect(results.getByText('22 of 42 valid')).toBeVisible()
   drowsyPictures = 20
   await expect(
     page.getByRole('heading', { name: 'Monitoring', exact: true }),
   ).toBeVisible()
-  await expect(results.getByText('20 of 42 valid pictures')).toBeVisible()
+  await expect(results.getByText('20 of 42 valid')).toBeVisible()
   await page.getByRole('button', { name: 'Stop', exact: true }).click()
   await page.getByRole('button', { name: 'Start camera' }).click()
-  await expect(results.getByText('20 of 42 valid pictures')).toHaveCount(0)
+  await expect(results.getByText('20 of 42 valid')).toHaveCount(0)
 })
 
-test('waits for enough valid pictures and does not invent observations between messages', async ({
+test('waits for enough valid and does not invent observations between messages', async ({
   page,
 }) => {
   let sentStatus = false
@@ -577,13 +576,12 @@ test('waits for enough valid pictures and does not invent observations between m
         captured_at_ms: 0,
         ear: 0.1,
         fatigue_probability: 0.9,
-        fsr_raw: 530,
-        tof_distance_mm: 129,
+        sensor_drowsy: true,
         present: false,
         minute: {
-          valid_samples: 10,
-          drowsy_samples: 10,
-          unavailable_samples: 50,
+          valid_samples: 9,
+          drowsy_samples: 9,
+          unavailable_samples: 51,
           window_seconds: 60,
         },
         alert: false,
@@ -599,9 +597,9 @@ test('waits for enough valid pictures and does not invent observations between m
     page.getByRole('heading', { name: 'Gathering observations' }),
   ).toBeVisible()
   const results = page.getByRole('region', { name: 'Detection results' })
-  await expect(results.getByText('10 of 10 valid pictures')).toBeVisible()
+  await expect(results.getByText('9 of 9 valid')).toBeVisible()
   await page.waitForTimeout(1500)
-  await expect(results.getByText('10 of 10 valid pictures')).toBeVisible()
+  await expect(results.getByText('9 of 9 valid')).toBeVisible()
   await expect(
     page.getByRole('heading', { name: 'Drowsiness detected' }),
   ).toHaveCount(0)

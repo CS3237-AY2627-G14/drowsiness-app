@@ -82,6 +82,7 @@ def test_socketio_authentication_and_status(client: TestClient) -> None:
         socket.send_frame(frame_payload)
         status = socket.receive()
         assert set(status) == {"type", "detection", "mqtt_alert_sent_recently"}
+        assert status["mqtt_alert_sent_recently"] is False
         assert status["detection"]["minute"] == {
             "valid_samples": 0,
             "drowsy_samples": 0,
@@ -111,6 +112,7 @@ def test_diagnostics_are_explicitly_requested(client: TestClient) -> None:
             "diagnostics",
             "mqtt_alert_sent_recently",
         }
+        assert status["mqtt_alert_sent_recently"] is False
         assert status["diagnostics"]["received_frames"] == 1
         assert status["diagnostics"]["processed_frames"] == 1
 
