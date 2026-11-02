@@ -16,13 +16,12 @@ from modules.processing.services.frame_processing_service import (
 from tests.helpers import FakeFramePredictor
 
 
-def test_alert_publishes_json_seat_identifier_to_results_topic(
+def test_result_publishes_aggregate_and_per_student_topics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def run() -> tuple[str, bytes, int]:
-        published: asyncio.Future[tuple[str, bytes, int]] = (
-            asyncio.get_running_loop().create_future()
-        )
+    async def run() -> list[tuple[str, bytes, int]]:
+        published: list[tuple[str, bytes, int]] = []
+        complete = asyncio.get_running_loop().create_future()
 
         class FakeMqttClient:
             def __init__(self, *, hostname: str, port: int) -> None:
@@ -36,7 +35,9 @@ def test_alert_publishes_json_seat_identifier_to_results_topic(
                 return None
 
             async def publish(self, topic: str, payload: bytes, *, qos: int) -> None:
-                published.set_result((topic, payload, qos))
+                published.append((topic, payload, qos))
+                if len(published) == 6:
+                    complete.set_result(None)
 
         monkeypatch.setattr(
             "modules.processing.mqtt_result_publisher.aiomqtt.Client",
@@ -44,14 +45,22 @@ def test_alert_publishes_json_seat_identifier_to_results_topic(
         )
         publisher = MqttResultPublisher(Settings(demo_seat_count=1))
         publisher.start()
-        publisher.enqueue_alert()
-        result = await asyncio.wait_for(published, timeout=1)
+        publisher.enqueue_result((1, 2))
+        publisher.enqueue_result(())
+        await asyncio.wait_for(complete, timeout=1)
         published_at_ms = publisher.last_published_at_ms
         await publisher.stop()
         assert published_at_ms is not None
-        return result
+        return published
 
-    assert asyncio.run(run()) == ("drowsy/result", b'{"id": "A1"}', 1)
+    assert asyncio.run(run()) == [
+        ("drowsy/result", b'{"drowsy_seats": ["A1", "A2"], "total_drowsy": 2}', 1),
+        ("drowsy/A1/result", b'{"drowsy": true}', 1),
+        ("drowsy/A2/result", b'{"drowsy": true}', 1),
+        ("drowsy/result", b'{"drowsy_seats": [], "total_drowsy": 0}', 1),
+        ("drowsy/A1/result", b'{"drowsy": false}', 1),
+        ("drowsy/A2/result", b'{"drowsy": false}', 1),
+    ]
 
 
 def test_alert_publishes_once_when_alert_turns_on() -> None:
@@ -60,7 +69,7 @@ def test_alert_publishes_once_when_alert_turns_on() -> None:
             self.alert_count = 0
             self.last_published_at_ms = time.time_ns() / 1_000_000
 
-        def enqueue_alert(self) -> None:
+        def enqueue_result(self, drowsy_seat_ids: tuple[int, ...]) -> None:
             self.alert_count += 1
 
     async def run() -> tuple[int, bool]:
@@ -74,6 +83,7 @@ def test_alert_publishes_once_when_alert_turns_on() -> None:
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
+        await processing_service.associate_seat(connection_id, 1)
 
         for frame_id in range(1, 32):
             processing_service._apply_frame_measurements(

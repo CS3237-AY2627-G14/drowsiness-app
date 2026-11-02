@@ -131,7 +131,7 @@ class FrameProcessingService:
         updated_row = self._update_sensor_row(row, measurements, received_at)
         self._seat_rows[seat_id] = updated_row
         self._save_connection_detection(seat_id, updated_row.detection_state)
-        self._enqueue_started_alert(row.detection_state, updated_row.detection_state)
+        self._publish_result(previous_drowsy)
         self._publish_seat(seat_id, previous_drowsy, sensor_driven=True)
 
     def _update_sensor_row(
@@ -219,6 +219,7 @@ class FrameProcessingService:
         self._seat_rows[seat_id] = row.model_copy(
             update={"latest_camera": None, "detection_state": DetectionState()}
         )
+        self._publish_result(previous_drowsy)
         self._publish_seat(seat_id, previous_drowsy, sensor_driven=False)
 
     async def _process_frames(self) -> None:
@@ -259,23 +260,16 @@ class FrameProcessingService:
             }
         )
         self._processing_registry.save(measurements.connection_id, updated_record)
-        self._enqueue_started_alert(record.detection_state, detection_state)
         if seat_id is not None:
+            self._publish_result(previous_drowsy)
             self._publish_seat(seat_id, previous_drowsy, sensor_driven=False)
 
-    def _enqueue_started_alert(
-        self, previous_state: DetectionState, current_state: DetectionState
-    ) -> None:
+    def _publish_result(self, previous_drowsy: tuple[int, ...]) -> None:
         if self._mqtt_result_publisher is None:
             return
-        previous_detection = previous_state.detection
-        detection = current_state.detection
-        if (
-            detection is not None
-            and detection.alert
-            and (previous_detection is None or not previous_detection.alert)
-        ):
-            self._mqtt_result_publisher.enqueue_alert()
+        current_drowsy = self._drowsy_seat_ids()
+        if current_drowsy != previous_drowsy:
+            self._mqtt_result_publisher.enqueue_result(current_drowsy)
 
     def _update_seat_detection(
         self, seat_id: int, measurements: FrameMeasurements

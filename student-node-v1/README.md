@@ -8,6 +8,6 @@ when prompted, including config.h), select the board, compile and upload.
 
 Wiring is documented in the sketch. Every 200 ms the node publishes four raw
 readings to drowsy/stud/<seat_id>/data. The Python base owns all detection rules.
-The node listens to drowsy/stud/<seat_id>/result and runs the five-second
+The node listens to its physical seat topic, such as `drowsy/A1/result`, and runs the five-second
 LED/buzzer sequence on a false-to-true drowsy result. Repeated true results do
 not extend the sequence; false re-arms it. Reflash together with the API update.

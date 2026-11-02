@@ -36,7 +36,7 @@ const char *subscribeTopic = "drowsy/result"; //Topic Name (Important!)
 
 volatile bool alarmRequested = false;
 
-char pendingId[10] = {};
+char pendingId[32] = {};
 portMUX_TYPE idMux = portMUX_INITIALIZER_UNLOCKED;
 ESP32MQTTClient mqttClient; 
 
@@ -67,7 +67,7 @@ void setup() {
 void loop() {
   
 
-    char idToDisplay[10];
+    char idToDisplay[32];
     bool showAlarm = false;
 
     portENTER_CRITICAL(&idMux);
@@ -84,7 +84,7 @@ void loop() {
       lcd.backlight();  
       lcd.clear();                 // Replace lcd with your LCD object's name
       lcd.setCursor(0, 0);
-      lcd.print("Seat Number:");
+      lcd.print("Drowsy Seats:");
       lcd.setCursor(0, 1);
       lcd.print(idToDisplay);
 
@@ -114,7 +114,7 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
     {
         mqttClient.subscribe(subscribeTopic, [](const std::string &payload)
         {
-            StaticJsonDocument<128> doc;
+            StaticJsonDocument<512> doc;
             DeserializationError error = deserializeJson(doc, payload.c_str());
 
             if (error)
@@ -123,15 +123,35 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
                 return;
             }
 
-            const char *id = doc["id"];
-            if (id == nullptr || strlen(id) == 0 || strlen(id) > 5)
+            JsonArray seats = doc["drowsy_seats"];
+            int total = doc["total_drowsy"] | seats.size();
+            if (total <= 0)
             {
-                log_i("JSON does not accept char more than 5");
                 return;
             }
 
+            char seatsText[24] = {};
+            size_t used = 0;
+            for (JsonVariant seat : seats)
+            {
+                int seatId = seat.as<int>();
+                int written = snprintf(seatsText + used, sizeof(seatsText) - used,
+                                       used == 0 ? "%d" : ",%d", seatId);
+                if (written < 0 || used + written >= sizeof(seatsText))
+                {
+                    break;
+                }
+                used += written;
+            }
+
+            const char *legacyId = doc["id"];
+            if (used == 0 && legacyId != nullptr)
+            {
+                snprintf(seatsText, sizeof(seatsText), "%s", legacyId);
+            }
+
             portENTER_CRITICAL(&idMux);
-            snprintf(pendingId, sizeof(pendingId), "%s", id);
+            snprintf(pendingId, sizeof(pendingId), "%s (%d)", seatsText, total);
             alarmRequested = true;
             portEXIT_CRITICAL(&idMux);
         });

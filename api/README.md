@@ -86,12 +86,16 @@ Unavailable or stale readings do not count. The rolling minute uses the latest
 picture per second and requires 10 valid samples, at least half drowsy.
 Sensor updates reclassify the latest sample without adding observations.
 
-The base publishes `{"drowsy":true}` to `drowsy/stud/<seat_id>/result`.
+The base publishes `{"drowsy":true}` to `drowsy/stud/<seat_id>/result` and
+`{"drowsy":true}`/`{"drowsy":false}` to the seat topic, such as
+`drowsy/A1/result`.
 Student nodes run their five-second alert on a false-to-true transition.
 Sensor-driven status publishes at most once per second, except alert changes.
 Changes to the alert set publish retained `{"drowsy_seats":[1,3]}` messages to
-`drowsy/lect/result`. The legacy lecturer notification remains
-`{"id":"A1"}` on `drowsy/result` at QoS 1; its seat label is still hardcoded.
+`drowsy/lect/result`. The aggregate `drowsy/result` notification lists the current
+drowsy seat IDs and total. Seat IDs use their physical labels: `A1`, `A2`, etc.
+Each affected student node also receives `{"drowsy":true}` or
+`{"drowsy":false}` on its own seat topic.
 The live status indicates successful legacy publication within ten seconds.
 
 Set `DROWSINESS_MQTT_ENABLED=false` to disable MQTT, or configure
