@@ -10,13 +10,8 @@
 
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
-
 #include "config.h"
 
-WiFiMulti wifiMulti;
-
-
-//Insert SSID and Password
 const char *ssid = WIFI_SSID;
 const char *pass = WIFI_PASSWORD;
 
@@ -24,160 +19,303 @@ const char *pass = WIFI_PASSWORD;
 #define LEDCHANNEL 1
 #define LEDFREQ 5000
 #define LEDRESOLUTION 8
-#define BUZZER_PIN 15 // The Arduino pin connected to the buzzer
+#define BUZZER_PIN 15
 
-
-// Replace 0x27 with your detected address
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-uint32_t delayMS;
+const char *server = MQTT_URI;
+const char *subscribeTopic = "drowsy/lect/result";
 
-const char *server = MQTT_URI; //Set to your Base's IP address
+constexpr size_t ID_LIST_CAPACITY = 1280;
+constexpr uint32_t LCD_SCROLL_INTERVAL_MS = 500;
+constexpr uint32_t ALARM_PHASE_MS = 150;
 
-const char *subscribeTopic = "drowsy/lect/result"; //Topic Name (Important!)
+struct DisplayData
+{
+    int numberStudents = 0;
+    char ids[ID_LIST_CAPACITY] = {};
+};
 
-volatile bool alarmRequested = false;
+DisplayData pendingData;
+portMUX_TYPE dataMux = portMUX_INITIALIZER_UNLOCKED;
+bool updatePending = false;
+bool alarmPending = false;
+// Owned by the MQTT callback; invalid messages do not establish a baseline.
+bool initialSnapshotPending = true;
+ESP32MQTTClient mqttClient;
 
-char pendingId[1280] = {};
-int pendingCount = 0;
-bool displayRequested = false;
-bool firstSnapshot = true;
-portMUX_TYPE idMux = portMUX_INITIALIZER_UNLOCKED;
-ESP32MQTTClient mqttClient; 
+DisplayData displayData;
+size_t scrollOffset = 0;
+uint32_t lastScrollAt = 0;
+bool alarmActive = false;
+uint8_t alarmPhase = 0;
+uint32_t alarmPhaseStartedAt = 0;
 
-void setup() {
+bool appendId(JsonVariant value, char *destination, size_t capacity, size_t &length)
+{
+    char numberBuffer[24];
+    const char *text = value.as<const char *>();
 
-  log_i();
-  log_i("setup, ESP.getSdkVersion(): ");
-  log_i("%s", ESP.getSdkVersion());
+    if (text == nullptr)
+    {
+        if (value.is<long>())
+        {
+            snprintf(numberBuffer, sizeof(numberBuffer), "%ld", value.as<long>());
+        }
+        else if (value.is<unsigned long>())
+        {
+            snprintf(numberBuffer, sizeof(numberBuffer), "%lu", value.as<unsigned long>());
+        }
+        else
+        {
+            return false;
+        }
+        text = numberBuffer;
+    }
 
-  mqttClient.enableDebuggingMessages();
+    const size_t textLength = strlen(text);
+    const size_t separatorLength = length == 0 ? 0 : 2;
+    if (length + separatorLength + textLength >= capacity)
+    {
+        return false;
+    }
 
-  mqttClient.setURI(server);
-  mqttClient.enableLastWillMessage("lwt", "I am going offline");
-  mqttClient.setKeepAlive(30);
-  mqttClient.setOnMessageCallback([](const std::string &topic, const std::string &payload) {
-        log_i("Global callback: %s: %s", topic.c_str(), payload.c_str());
-    });
-  WiFi.begin(ssid, pass);
-  WiFi.setHostname("c3test");
-  mqttClient.loopStart();
-
-  ledcAttachChannel(LEDPIN,LEDFREQ,LEDRESOLUTION,LEDCHANNEL);
-  Wire.begin(21, 22);
-  lcd.init();
-
+    if (separatorLength != 0)
+    {
+        destination[length++] = ',';
+        destination[length++] = ' ';
+    }
+    memcpy(destination + length, text, textLength);
+    length += textLength;
+    destination[length] = '\0';
+    return true;
 }
 
-void loop() {
-  
-
-    char idToDisplay[1280];
-    int seatCount = 0;
-    bool refreshDisplay = false;
-    bool showAlarm = false;
-
-    portENTER_CRITICAL(&idMux);
-    if (displayRequested)
+bool hasAddedSeats(const DisplayData &previousData, const DisplayData &newData)
+{
+    const char *newId = newData.ids;
+    while (*newId != '\0')
     {
-    displayRequested = false;
-    refreshDisplay = true;
-    seatCount = pendingCount;
-    memcpy(idToDisplay, pendingId, sizeof(idToDisplay));
-    showAlarm = alarmRequested;
-    alarmRequested = false;
+        const size_t newLength = strcspn(newId, ",");
+        const char *previousId = previousData.ids;
+        bool found = false;
+        while (*previousId != '\0')
+        {
+            const size_t previousLength = strcspn(previousId, ",");
+            if (newLength == previousLength && strncmp(newId, previousId, newLength) == 0)
+            {
+                found = true;
+                break;
+            }
+            previousId += previousLength;
+            if (*previousId != '\0')
+            {
+                previousId += 2;
+            }
+        }
+        if (!found)
+        {
+            return true;
+        }
+        newId += newLength;
+        if (*newId != '\0')
+        {
+            newId += 2;
+        }
     }
-    portEXIT_CRITICAL(&idMux);
-
-    static char displayedSeats[1280] = {};
-    static int displayedCount = 0;
-    static unsigned long lastPage = 0;
-    static size_t page = 0;
-    if (refreshDisplay) {
-      snprintf(displayedSeats, sizeof(displayedSeats), "%s", idToDisplay);
-      displayedCount = seatCount;
-      page = 0;
-      lastPage = 0;
-    }
-    if (refreshDisplay || millis() - lastPage >= 2000) {
-      lastPage = millis();
-      lcd.backlight();
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      if (!displayedCount) lcd.print("No drowsy seats");
-      else {
-        lcd.print("Drowsy: "); lcd.print(displayedCount);
-        lcd.setCursor(0, 1);
-        char line[17] = {};
-        snprintf(line, sizeof(line), "%.16s", displayedSeats + page);
-        lcd.print(line);
-        page = page + 16 < strlen(displayedSeats) ? page + 16 : 0;
-      }
-    }
-    if (showAlarm)
-    {
-      ledcWriteChannel(LEDCHANNEL, 15);
-      tone(BUZZER_PIN, 392, 500);
-      delay(100);
-      ledcWriteChannel(LEDCHANNEL, 0);
-      delay(100);
-      ledcWriteChannel(LEDCHANNEL, 15);
-      delay(100);
-      ledcWriteChannel(LEDCHANNEL, 0);
-      delay(100);
-      ledcWriteChannel(LEDCHANNEL, 15);
-      delay(100);
-      ledcWriteChannel(LEDCHANNEL, 0);
-      delay(500);
-
-
-    }
-   
+    return false;
 }
 
+void queueDisplayData(const DisplayData &newData)
+{
+    // Only the MQTT callback writes pendingData; loop() only copies it.
+    const bool shouldAlarm = !initialSnapshotPending && hasAddedSeats(pendingData, newData);
+    initialSnapshotPending = false;
+    if (newData.numberStudents == pendingData.numberStudents && strcmp(newData.ids, pendingData.ids) == 0)
+    {
+        return;
+    }
+
+    portENTER_CRITICAL(&dataMux);
+    pendingData = newData;
+    updatePending = true;
+    alarmPending = alarmPending || shouldAlarm;
+    portEXIT_CRITICAL(&dataMux);
+}
+
+void renderLcd(const DisplayData &data)
+{
+    char topLine[17];
+    snprintf(topLine, sizeof(topLine), "Drowsy: %d", data.numberStudents);
+    lcd.setCursor(0, 0);
+    lcd.print(topLine);
+    for (size_t i = strlen(topLine); i < 16; ++i)
+    {
+        lcd.print(' ');
+    }
+
+    const char *ids = data.ids[0] == '\0' ? "No IDs reported" : data.ids;
+    const size_t idsLength = strlen(ids);
+    lcd.setCursor(0, 1);
+
+    if (idsLength <= 16)
+    {
+        lcd.print(ids);
+        for (size_t i = idsLength; i < 16; ++i)
+        {
+            lcd.print(' ');
+        }
+        return;
+    }
+
+    const size_t cycleLength = idsLength + 3;
+    for (size_t i = 0; i < 16; ++i)
+    {
+        const size_t position = (scrollOffset + i) % cycleLength;
+        lcd.print(position < idsLength ? ids[position] : ' ');
+    }
+}
+
+void startAlarm()
+{
+    alarmActive = true;
+    alarmPhase = 0;
+    alarmPhaseStartedAt = millis();
+    ledcWriteChannel(LEDCHANNEL, 15);
+    tone(BUZZER_PIN, 392);
+}
+
+void updateAlarm()
+{
+    if (!alarmActive || millis() - alarmPhaseStartedAt < ALARM_PHASE_MS)
+    {
+        return;
+    }
+
+    alarmPhaseStartedAt = millis();
+    ++alarmPhase;
+    if (alarmPhase >= 6)
+    {
+        alarmActive = false;
+        ledcWriteChannel(LEDCHANNEL, 0);
+        noTone(BUZZER_PIN);
+        return;
+    }
+
+    if (alarmPhase % 2 == 0)
+    {
+        ledcWriteChannel(LEDCHANNEL, 15);
+        tone(BUZZER_PIN, 392);
+    }
+    else
+    {
+        ledcWriteChannel(LEDCHANNEL, 0);
+        noTone(BUZZER_PIN);
+    }
+}
+
+void setup()
+{
+    Serial.begin(115200);
+
+    mqttClient.enableDebuggingMessages();
+    mqttClient.setURI(server);
+    mqttClient.enableLastWillMessage("lwt", "I am going offline");
+    mqttClient.setKeepAlive(30);
+
+    WiFi.begin(ssid, pass);
+    WiFi.setHostname("c3test");
+    mqttClient.loopStart();
+
+    ledcAttachChannel(LEDPIN, LEDFREQ, LEDRESOLUTION, LEDCHANNEL);
+    ledcWriteChannel(LEDCHANNEL, 0);
+    Wire.begin(21, 22);
+    lcd.init();
+    lcd.backlight();
+    renderLcd(displayData);
+}
+
+void loop()
+{
+    bool hasNewData = false;
+    bool shouldAlarm = false;
+
+    portENTER_CRITICAL(&dataMux);
+    if (updatePending)
+    {
+        displayData = pendingData;
+        updatePending = false;
+        hasNewData = true;
+        shouldAlarm = alarmPending;
+        alarmPending = false;
+    }
+    portEXIT_CRITICAL(&dataMux);
+
+    if (hasNewData)
+    {
+        scrollOffset = 0;
+        lastScrollAt = millis();
+        renderLcd(displayData);
+        if (shouldAlarm)
+        {
+            startAlarm();
+        }
+    }
+
+    const uint32_t now = millis();
+    if (strlen(displayData.ids) > 16 && now - lastScrollAt >= LCD_SCROLL_INTERVAL_MS)
+    {
+        lastScrollAt = now;
+        ++scrollOffset;
+        renderLcd(displayData);
+    }
+
+    updateAlarm();
+    delay(1);
+}
 
 void onMqttConnect(esp_mqtt_client_handle_t client)
 {
     if (mqttClient.isMyTurn(client))
     {
-        firstSnapshot = true;
+        initialSnapshotPending = true;
+        portENTER_CRITICAL(&dataMux);
+        alarmPending = false;
+        portEXIT_CRITICAL(&dataMux);
         mqttClient.subscribe(subscribeTopic, [](const std::string &payload)
         {
             StaticJsonDocument<4096> doc;
-            DeserializationError error = deserializeJson(doc, payload.c_str());
-
+            const DeserializationError error = deserializeJson(doc, payload.c_str());
             if (error)
             {
                 log_i("Invalid JSON: %s", error.c_str());
                 return;
             }
 
-            if (!doc["drowsy_seats"].is<JsonArray>()) return;
-            static int previousSeats[250] = {};
-            static size_t previousCount = 0;
-            int seats[250] = {};
-            size_t count = 0;
-            bool added = false;
-            char labels[1280] = {};
-            for (JsonVariant value : doc["drowsy_seats"].as<JsonArray>()) {
-              if (!value.is<int>() || value.as<int>() <= 0 || count >= 250) return;
-              int seat = value.as<int>();
-              bool found = false;
-              for (size_t i = 0; i < previousCount; ++i) if (previousSeats[i] == seat) found = true;
-              added = added || !found;
-              seats[count++] = seat;
-              size_t used = strlen(labels);
-              snprintf(labels + used, sizeof(labels) - used, "%s%d", used ? "," : "", seat);
+            if (!doc["drowsy_seats"].is<JsonArray>())
+            {
+                log_i("JSON must contain a 'drowsy_seats' array");
+                return;
             }
-            portENTER_CRITICAL(&idMux);
-            snprintf(pendingId, sizeof(pendingId), "%s", labels);
-            pendingCount = count;
-            alarmRequested = alarmRequested || (added && !firstSnapshot);
-            displayRequested = true;
-            portEXIT_CRITICAL(&idMux);
-            memcpy(previousSeats, seats, sizeof(seats));
-            previousCount = count;
-            firstSnapshot = false;
+
+            DisplayData newData;
+            size_t idsLength = 0;
+            for (JsonVariant id : doc["drowsy_seats"].as<JsonArray>())
+            {
+                if (!id.is<int>() || id.as<int>() <= 0)
+                {
+                    log_i("Seat IDs must be positive integers");
+                    return;
+                }
+                if (!appendId(id, newData.ids, sizeof(newData.ids), idsLength))
+                {
+                    log_i("Seat IDs exceed the display buffer");
+                    return;
+                }
+                ++newData.numberStudents;
+            }
+
+            queueDisplayData(newData);
         });
     }
 }
@@ -188,12 +326,10 @@ esp_err_t handleMQTT(esp_mqtt_event_handle_t event)
     mqttClient.onEventCallback(event);
     return ESP_OK;
 }
-#else  // IDF CHECK
+#else
 void handleMQTT(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     auto *event = static_cast<esp_mqtt_event_handle_t>(event_data);
     mqttClient.onEventCallback(event);
 }
-#endif 
-
-//Buzzer code adapted from: https://arduinogetstarted.com/tutorials/arduino-piezo-buzzer
+#endif
