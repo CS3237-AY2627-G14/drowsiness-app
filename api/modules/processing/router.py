@@ -4,7 +4,6 @@ from pydantic import BaseModel, ConfigDict
 from modules.processing.publishing import (
     QueueSeatStatusPublisher,
     SeatStatusUpdate,
-    StudentSeatStatus,
 )
 
 
@@ -22,50 +21,7 @@ class LecturerSeatSnapshot(BaseModel):
     seats: tuple[LecturerSeatStatus, ...]
 
 
-class DemoSeatStatus(BaseModel):
-    model_config = ConfigDict(frozen=True, strict=True)
-
-    seat_id: int
-    drowsy: bool
-
-
-class DemoLecturerStatus(BaseModel):
-    model_config = ConfigDict(frozen=True, strict=True)
-
-    seats: tuple[DemoSeatStatus, ...]
-
-
 router = APIRouter(prefix="/api/lecturer", tags=["lecturer"])
-
-
-@router.post("/demo/statuses")
-async def set_demo_statuses(
-    request: Request, demo_statuses: DemoLecturerStatus
-) -> LecturerSeatSnapshot:
-    publisher: QueueSeatStatusPublisher | None = getattr(
-        request.app.state, "status_publisher", None
-    )
-    if publisher is None:
-        return LecturerSeatSnapshot(drowsy_seats=(), seats=())
-
-    for seat_status in demo_statuses.seats:
-        publisher.publish(
-            SeatStatusUpdate(
-                student=StudentSeatStatus(
-                    seat_id=seat_status.seat_id,
-                    drowsy=seat_status.drowsy,
-                )
-            )
-        )
-    drowsy_seats = tuple(
-            sorted(
-                seat_status.seat_id
-                for seat_status in demo_statuses.seats
-                if seat_status.drowsy
-            )
-        )
-    publisher.publish(SeatStatusUpdate(drowsy_seats=drowsy_seats))
-    return await get_lecturer_seats(request)
 
 
 @router.get("/seats")
