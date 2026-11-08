@@ -19,6 +19,11 @@ Skip the copy if you already have `.env`. Start the API separately using the
 `/api` requests to `http://127.0.0.1:8000`. Select a seat, start the camera, then
 Publish. Demo tokens look like `demo-room-101-seat-1`.
 
+Lecturers can open http://localhost:3000/lecturer to view the classroom seat
+layout. Seats use the configured student-node seat numbers and refresh every two
+seconds; red seats are drowsy, green seats are awake, and unreported seats have
+no status.
+
 Camera settings are listed in [.env.example](.env.example). Overrides can go in
 `.env.local`; restart Vite after changing them. Camera access requires localhost
 or trusted HTTPS. For remote cameras, set both `DEV_TLS_CERT` and `DEV_TLS_KEY`

@@ -43,6 +43,8 @@ class SeatStatusPublisher(Protocol):
 
     def get_last_alert_published_at(self, seat_id: int) -> float | None: ...
 
+    def clear_student(self, seat_id: int) -> None: ...
+
 
 class QueueSeatStatusPublisher:
     def __init__(self, updates: asyncio.Queue[SeatStatusUpdate]) -> None:
@@ -70,6 +72,9 @@ class QueueSeatStatusPublisher:
         if update.drowsy_seats is not None:
             self._drowsy_seats = update.drowsy_seats
         self._updates.put_nowait(update)
+
+    def clear_student(self, seat_id: int) -> None:
+        self._students.pop(seat_id, None)
 
 
 def build_mqtt_publications(

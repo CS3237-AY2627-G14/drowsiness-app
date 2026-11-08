@@ -9,6 +9,7 @@ import { validatePublishSearch } from '#/features/streaming/pages/PublishPage/ut
 import { NotFound } from '#/components/NotFound.tsx'
 import { CalibrationPage } from '#/features/calibration/pages/CalibrationPage/CalibrationPage'
 import { RootLayout } from './layouts/RootLayout.tsx'
+import { LecturerPage } from '#/features/lecturer/pages/LecturerPage/LecturerPage.tsx'
 
 const rootRoute = createRootRoute({
   component: RootLayout,
@@ -36,6 +37,11 @@ export const router = createRouter({
       getParentRoute: () => rootRoute,
       path: '/calibration',
       component: CalibrationPage,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: '/lecturer',
+      component: LecturerPage,
     }),
   ]),
   scrollRestoration: true,
