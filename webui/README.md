@@ -30,6 +30,31 @@ or trusted HTTPS. For remote cameras, set both `DEV_TLS_CERT` and `DEV_TLS_KEY`
 in `.env.local` and add the exact HTTPS origin to the API's
 `DROWSINESS_ALLOWED_ORIGINS`. Certificate paths resolve from `webui/`.
 
+## ngrok access
+
+Keep Vite on port 3000 and the API on port 8000, then expose only Vite:
+
+```powershell
+ngrok http 3000
+```
+
+Use the HTTPS forwarding URL shown by ngrok:
+
+```text
+https://your-ngrok-host.ngrok-free.dev/streaming
+```
+
+Vite proxies HTTP and Socket.IO requests under `/api` to `127.0.0.1:8000`; a
+second ngrok tunnel is not required. Add the exact ngrok origin, without the
+`/streaming` path, to `api/.env`:
+
+```dotenv
+DROWSINESS_ALLOWED_ORIGINS=["https://your-ngrok-host.ngrok-free.dev"]
+```
+
+Restart the API after changing its allowed origins. The free ngrok URL may change
+when the tunnel restarts, so repeat this step with the new HTTPS origin.
+
 ## Sensor calibration
 
 Open http://localhost:3000/calibration after initializing API calibration storage

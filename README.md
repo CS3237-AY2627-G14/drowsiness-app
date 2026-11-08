@@ -80,6 +80,32 @@ Camera access needs localhost or trusted HTTPS. For remote cameras, set both
 origin to `DROWSINESS_ALLOWED_ORIGINS`. Certificate paths resolve from `webui/`;
 use Linux paths in WSL. Do not commit private keys or credentials.
 
+### ngrok access
+
+Keep the API running on port 8000 and the web UI running on port 3000, then
+expose only the web UI:
+
+```powershell
+ngrok http 3000
+```
+
+Vite proxies `/api` HTTP, SSE, and Socket.IO traffic to the API at port 8000, so
+the backend does not need a separate ngrok tunnel. Open the HTTPS forwarding URL
+shown by ngrok, for example:
+
+```text
+https://friction-bunny-stove.ngrok-free.dev/streaming
+```
+
+Set the exact HTTPS origin in `api/.env` and restart the API:
+
+```dotenv
+DROWSINESS_ALLOWED_ORIGINS=["https://friction-bunny-stove.ngrok-free.dev"]
+```
+
+The origin is the scheme and host only, without a path. Restart ngrok and update
+this setting whenever the ngrok free URL changes.
+
 ## MQTT
 
 Student nodes publish versioned telemetry every 200 ms to
