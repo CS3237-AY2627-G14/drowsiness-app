@@ -24,6 +24,14 @@ export default defineConfig(({ mode }) => {
   const workingDirectory = process.cwd()
   const env = loadEnv(mode, workingDirectory, '')
   const https = loadDevelopmentTls(env)
+  const configuredAllowedHosts = env.DEV_ALLOWED_HOSTS?.split(',')
+    .map((host) => host.trim())
+    .filter(Boolean) ?? []
+  const allowedHosts = [
+    'localhost',
+    '127.0.0.1',
+    ...configuredAllowedHosts,
+  ]
   const proxy = {
     '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true, ws: true },
   }
@@ -34,7 +42,21 @@ export default defineConfig(({ mode }) => {
       viteReact(),
       babel({ presets: [reactCompilerPreset()] }),
     ],
-    server: { host: '0.0.0.0', port: 3000, strictPort: true, https, proxy },
-    preview: { host: '0.0.0.0', port: 3000, strictPort: true, https, proxy },
+    server: {
+      host: '0.0.0.0',
+      port: 3000,
+      strictPort: true,
+      https,
+      proxy,
+      allowedHosts,
+    },
+    preview: {
+      host: '0.0.0.0',
+      port: 3000,
+      strictPort: true,
+      https,
+      proxy,
+      allowedHosts,
+    },
   }
 })

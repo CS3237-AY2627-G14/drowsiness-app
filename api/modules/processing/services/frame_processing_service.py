@@ -378,6 +378,8 @@ class FrameProcessingService:
         del self._connection_by_seat[seat_id]
         if seat_id == 1 and self._measurement_recorder is not None:
             self._measurement_recorder.reset_sensor_history()
+        if self._status_publisher is not None:
+            self._status_publisher.clear_student(seat_id)
         row = self._seat_rows.get(seat_id)
         if row is None or row.detection_state.detection is None:
             return
@@ -420,7 +422,16 @@ class FrameProcessingService:
             self._measurement_recorder.reset_sensor_history()
         previous_drowsy = self._drowsy_seat_ids()
         self._seat_rows[1] = SeatRow()
-        self._publish_seat(1, previous_drowsy, sensor_driven=False)
+        current_drowsy = self._drowsy_seat_ids()
+        if self._status_publisher is not None:
+            self._status_publisher.clear_student(1)
+        if (
+            self._status_publisher is not None
+            and previous_drowsy != current_drowsy
+        ):
+            self._status_publisher.publish(
+                SeatStatusUpdate(drowsy_seats=current_drowsy)
+            )
         # Existing connections retain ownership; reset their observations and queues.
         for connection_id in tuple(self._connection_ids):
             record = self._processing_registry.get(connection_id)

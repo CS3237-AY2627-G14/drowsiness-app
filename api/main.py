@@ -30,6 +30,7 @@ from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.mqtt_router import SensorMqttRouter
 from modules.processing.publishing import QueueSeatStatusPublisher, SeatStatusUpdate
 from modules.processing.recording import MeasurementRecorder
+from modules.processing.router import router as lecturer_router
 from modules.processing.repositories.registry import InMemoryProcessingRegistry
 from modules.processing.services.frame_processing_service import FrameProcessingService
 from modules.processing.services.sensor_classification_service import (
@@ -157,11 +158,8 @@ def create_app(
         )
         async with AsyncExitStack() as calibration_shutdown_stack:
             status_updates: asyncio.Queue[SeatStatusUpdate] = asyncio.Queue()
-            status_publisher = (
-                QueueSeatStatusPublisher(status_updates)
-                if configuration.mqtt_enabled
-                else None
-            )
+            status_publisher = QueueSeatStatusPublisher(status_updates)
+            application.state.status_publisher = status_publisher
             async with inference_factory(configuration) as inference_runtime:
                 (
                     streaming_socket_router,
@@ -203,6 +201,7 @@ def create_app(
     application = FastAPI(title="Drowsiness API", lifespan=lifespan)
     application.include_router(classrooms_router)
     application.include_router(calibration_router)
+    application.include_router(lecturer_router)
 
     @application.exception_handler(ValueError)
     @application.exception_handler(RuntimeError)

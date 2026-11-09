@@ -29,9 +29,11 @@ def classify_frame(measurements: FrameMeasurements, settings: Settings) -> bool 
     left_ear = measurements.left_ear
     right_ear = measurements.right_ear
     probability = measurements.fatigue_probability
-    has_eye_measurements = left_ear is not None and right_ear is not None
-    if not has_eye_measurements and probability is None:
-        return True
+    has_camera_measurements = (
+        left_ear is not None or right_ear is not None or probability is not None
+    )
+    if not has_camera_measurements:
+        return None
     are_eyes_closed = (
         left_ear is not None
         and right_ear is not None

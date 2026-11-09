@@ -38,6 +38,9 @@ class RecordingStatusPublisher:
     def publish(self, update: SeatStatusUpdate) -> None:
         self.updates.append(update)
 
+    def clear_student(self, seat_id: int) -> None:
+        return
+
 
 def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -> None:
     async def run() -> None:

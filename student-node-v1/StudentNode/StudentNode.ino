@@ -47,6 +47,14 @@ const unsigned long SENSOR_MS = 200;    // read sensors every 200 ms
 const unsigned long PUBLISH_MS = 200;
 const unsigned long DEBUG_MS = 500;     // debug print every 0.5 s
 
+// ---------- Sleep mode ----------
+// present = ToF sees something closer than PRESENT_MM (same 300 mm the API uses).
+// After nobody is present for SLEEP_AFTER_MS, the node stops reading the other
+// sensors and stops sending to MQTT. It only checks the ToF until someone sits
+// down again, then wakes up and sends immediately.
+const int PRESENT_MM = 300;
+const unsigned long SLEEP_AFTER_MS = 15000;   // 15 s
+
 const char alertTopic[] = "drowsy/stud/" SEAT_ID "/result";
 const char dataTopic[] = "drowsy/stud/" SEAT_ID "/data";
 
@@ -67,10 +75,14 @@ int upperCm = -1;    // ultrasonic, -1 = no echo
 int lowerMm = -1;    // ToF, -1 = out of range
 int backValue = 0;
 int deskValue = 0;
+unsigned long ultrasonicPulseUs = 0;
 
 unsigned long lastSensor = 0;
 unsigned long lastPublish = 0;
 unsigned long lastDebug = 0;
+
+bool sleeping = false;
+unsigned long lastPresentMs = 0;   // last time present = 1
 
 // ================= Alert (LED + buzzer) =================
 
@@ -123,9 +135,9 @@ int readUltrasonicCm() {
   digitalWrite(US_TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(US_TRIG_PIN, LOW);
-  unsigned long us = pulseIn(US_ECHO_PIN, HIGH, 30000);  // give up after 30 ms
-  if (us == 0) return -1;
-  return (int)(us * 0.0343 / 2);
+  ultrasonicPulseUs = pulseIn(US_ECHO_PIN, HIGH, 30000);  // give up after 30 ms
+  if (ultrasonicPulseUs == 0) return -1;
+  return (int)(ultrasonicPulseUs * 0.0343 / 2);
 }
 
 int readTofMm() {
@@ -140,8 +152,12 @@ int readTofMm() {
 }
 
 void printDebug() {
-  Serial.printf("upper=%4d cm | lower=%4d mm | back=%4d | desk=%4d\n",
-                upperCm, lowerMm, backValue, deskValue);
+  if (sleeping) {
+    Serial.printf("SLEEPING (no MQTT) | lower=%4d mm\n", lowerMm);
+    return;
+  }
+  Serial.printf("upper=%4d cm (echo=%5lu us) | lower=%4d mm | back=%4d | desk=%4d\n",
+                upperCm, ultrasonicPulseUs, lowerMm, backValue, deskValue);
 }
 
 void publishData() {
@@ -162,12 +178,32 @@ void publishData() {
   mqttClient.publish(dataTopic, json, 0, false);
 }
 
+bool isPresent() {
+  return lowerMm >= 0 && lowerMm < PRESENT_MM;
+}
+
 void readSensors() {
+  lowerMm = readTofMm();   // ToF is always read: it decides sleep / wake
+  if (sleeping) return;    // asleep: skip the other sensors
   upperCm = readUltrasonicCm();
-  lowerMm = readTofMm();
   backValue = analogRead(FSR_BACK_PIN);
   deskValue = analogRead(FSR_DESK_PIN);
+}
 
+void updateSleep(unsigned long now) {
+  if (isPresent()) {
+    lastPresentMs = now;
+    if (sleeping) {
+      sleeping = false;
+      Serial.println("Present again: waking up, sending data");
+      readSensors();       // fresh readings of all sensors
+      publishData();       // send straight away
+      lastPublish = now;
+    }
+  } else if (!sleeping && now - lastPresentMs >= SLEEP_AFTER_MS) {
+    sleeping = true;
+    Serial.println("Not present for 15 s: sleep mode, MQTT sending stopped");
+  }
 }
 
 // ================= setup / loop =================
@@ -182,6 +218,7 @@ void setup() {
   pinMode(FSR_BACK_PIN, INPUT);
   pinMode(FSR_DESK_PIN, INPUT);
   setOutputs(false);
+  lastPresentMs = millis();   // start awake, sleep only after 15 s with nobody
 
   Wire.begin(21, 22);
   tofOk = tof.begin();
@@ -208,8 +245,9 @@ void loop() {
   if (now - lastSensor >= SENSOR_MS) {
     lastSensor = now;
     readSensors();
+    updateSleep(now);
   }
-  if (now - lastPublish >= PUBLISH_MS) {
+  if (!sleeping && now - lastPublish >= PUBLISH_MS) {
     lastPublish = now;
     publishData();
   }

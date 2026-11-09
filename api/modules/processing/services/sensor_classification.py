@@ -1,4 +1,8 @@
+import logging
+
 from modules.processing.schemas import RawTelemetry, SensorMeasurements
+
+logger = logging.getLogger(__name__)
 
 # ---------- Placeholder thresholds: tune with sensor_test_4 ----------
 # upper distance below 6 cm (0-5)  -> Low (head near the chair top)
@@ -22,24 +26,24 @@ DESK_TOLERANCE = 500
 #  #  | upper  | lower        | backrest | desk    | result
 # ----+--------+--------------+----------+---------+-----------
 #  1  | any    | Out-Of-Range | any      | any     | no result
-#  2  | Low    | Detected     | Low      | Lower   | no result
-#  3  | Medium | Detected     | Low      | Lower   | no result
-#  4  | High   | Detected     | Low      | Lower   | no result
-#  5  | Low    | Detected     | Medium   | Lower   | no result
-#  6  | Medium | Detected     | Medium   | Lower   | no result
-#  7  | High   | Detected     | Medium   | Lower   | no result
-#  8  | Low    | Detected     | High     | Lower   | no result
-#  9  | Medium | Detected     | High     | Lower   | no result
-#  10 | High   | Detected     | High     | Lower   | no result
-#  11 | Low    | Detected     | Low      | Close   | drowsy
-#  12 | Medium | Detected     | Low      | Close   | drowsy
-#  13 | High   | Detected     | Low      | Close   | drowsy
-#  14 | Low    | Detected     | Medium   | Close   | not drowsy
-#  15 | Medium | Detected     | Medium   | Close   | drowsy
-#  16 | High   | Detected     | Medium   | Close   | drowsy
-#  17 | Low    | Detected     | High     | Close   | not drowsy
-#  18 | Medium | Detected     | High     | Close   | drowsy
-#  19 | High   | Detected     | High     | Close   | drowsy
+#  2  | Low    | Detected     | Low      | 1000 - 2000   | no result
+#  3  | Medium | Detected     | Low      | 1000 - 2000   | no result
+#  4  | High   | Detected     | Low      | 1000 - 2000   | no result
+#  5  | Low    | Detected     | Medium   | 1000 - 2000   | no result
+#  6  | Medium | Detected     | Medium   | 1000 - 2000   | no result
+#  7  | High   | Detected     | Medium   | 1000 - 2000   | no result
+#  8  | Low    | Detected     | High     | 1000 - 2000   | no result
+#  9  | Medium | Detected     | High     | 1000 - 2000   | no result
+#  10 | High   | Detected     | High     | 1000 - 2000   | no result
+#  11 | Low    | Detected     | Low      | Low   | drowsy
+#  12 | Medium | Detected     | Low      | Low   | drowsy
+#  13 | High   | Detected     | Low      | Low   | drowsy
+#  14 | Low    | Detected     | Medium   | Low   | not drowsy
+#  15 | Medium | Detected     | Medium   | Low   | drowsy
+#  16 | High   | Detected     | Medium   | Low   | drowsy
+#  17 | Low    | Detected     | High     | Low   | not drowsy
+#  18 | Medium | Detected     | High     | Low   | drowsy
+#  19 | High   | Detected     | High     | Low   | drowsy
 #  20 | Low    | Detected     | Low      | Higher  | not drowsy
 #  21 | Medium | Detected     | Low      | Higher  | drowsy
 #  22 | High   | Detected     | Low      | Higher  | drowsy
@@ -89,11 +93,62 @@ def classify_raw_telemetry(
 ) -> SensorMeasurements:
     present = None if telemetry.lower_mm is None else telemetry.lower_mm < presence_mm
     drowsy = None
-    if present and telemetry.upper_cm is not None:
-        upper = classify_three_levels(telemetry.upper_cm, US_LOW_MAX_CM, US_MED_MAX_CM)
+    table_index: int | None = None
+    upper: int | None = None
+    back: int | None = None
+    desk: int | None = None
+    # if present and telemetry.upper_cm is not None:
+    if present:
+        if  telemetry.upper_cm is None:
+            upper = 0
+        else:
+            upper = classify_three_levels(telemetry.upper_cm, US_LOW_MAX_CM, US_MED_MAX_CM)
         back = classify_three_levels(telemetry.back_adc, BACK_LOW_MAX, BACK_MED_MAX)
-        desk = 0 if telemetry.desk_adc < 1000 else 2 if telemetry.desk_adc > 2000 else 1
-        drowsy = ROW_RESULT[2 + desk * 9 + back * 3 + upper]
+        desk = 1 if telemetry.desk_adc < 1000 else 2 if telemetry.desk_adc > 2000 else 0
+        table_index = 2 + desk * 9 + back * 3 + upper
+        drowsy = ROW_RESULT[table_index]
+    if drowsy is None:
+        reason = (
+            "lower distance missing"
+            if telemetry.lower_mm is None
+            else "seat unoccupied"
+            if not present
+            else "upper distance missing"
+            if telemetry.upper_cm is None
+            else f"truth table row {table_index} has no result"
+        )
+        logger.info(
+            "Sensor gate unavailable: reason=%s boot_id=%s sequence=%d "
+            "upper_cm=%s lower_mm=%s back_adc=%d desk_adc=%d "
+            "levels(upper=%s, back=%s, desk=%s)",
+            reason,
+            telemetry.boot_id,
+            telemetry.sequence,
+            telemetry.upper_cm,
+            telemetry.lower_mm,
+            telemetry.back_adc,
+            telemetry.desk_adc,
+            upper,
+            back,
+            desk,
+        )
+    else:
+        logger.debug(
+            "Sensor gate classified: drowsy=%s boot_id=%s sequence=%d "
+            "upper_cm=%d lower_mm=%d back_adc=%d desk_adc=%d "
+            "levels(upper=%d, back=%d, desk=%d) truth_table_row=%d",
+            drowsy,
+            telemetry.boot_id,
+            telemetry.sequence,
+            telemetry.upper_cm,
+            telemetry.lower_mm,
+            telemetry.back_adc,
+            telemetry.desk_adc,
+            upper,
+            back,
+            desk,
+            table_index,
+        )
     return SensorMeasurements(
         drowsy=drowsy,
         present=present,

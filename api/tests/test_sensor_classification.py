@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from modules.processing.schemas import RawTelemetry
@@ -94,3 +96,24 @@ def test_sensor_boundaries(
     )
     result = classify_raw_telemetry(reading, 0.0)
     assert (result.present, result.drowsy) == (present, drowsy)
+
+
+def test_missing_gate_logs_why_truth_table_has_no_result(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    reading = RawTelemetry(
+        schema_version=1,
+        boot_id="test",
+        sequence=7,
+        uptime_ms=1400,
+        upper_cm=3,
+        lower_mm=150,
+        back_adc=0,
+        desk_adc=500,
+    )
+
+    with caplog.at_level(logging.INFO):
+        classify_raw_telemetry(reading, 0.0)
+
+    assert "truth table row 2 has no result" in caplog.text
+    assert "sequence=7" in caplog.text

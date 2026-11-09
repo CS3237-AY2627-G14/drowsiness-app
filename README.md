@@ -80,6 +80,32 @@ Camera access needs localhost or trusted HTTPS. For remote cameras, set both
 origin to `DROWSINESS_ALLOWED_ORIGINS`. Certificate paths resolve from `webui/`;
 use Linux paths in WSL. Do not commit private keys or credentials.
 
+### ngrok access
+
+Keep the API running on port 8000 and the web UI running on port 3000, then
+expose only the web UI:
+
+```powershell
+ngrok http 3000
+```
+
+Vite proxies `/api` HTTP, SSE, and Socket.IO traffic to the API at port 8000, so
+the backend does not need a separate ngrok tunnel. Open the HTTPS forwarding URL
+shown by ngrok, for example:
+
+```text
+https://friction-bunny-stove.ngrok-free.dev/streaming
+```
+
+Set the exact HTTPS origin in `api/.env` and restart the API:
+
+```dotenv
+DROWSINESS_ALLOWED_ORIGINS=["https://friction-bunny-stove.ngrok-free.dev"]
+```
+
+The origin is the scheme and host only, without a path. Restart ngrok and update
+this setting whenever the ngrok free URL changes.
+
 ## MQTT
 
 Student nodes publish versioned telemetry every 200 ms to
@@ -96,11 +122,12 @@ packets. Reflash all student nodes with this API; older payloads are unsupported
 The API owns the corrected sensor truth table and learned seat 1 classifier.
 Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence
 (up to five seconds old) combines with camera measurements. Sensor-awake counts
-as awake; sensor-drowsy counts when the camera agrees or has no face measurements.
-An awake camera overrides a drowsy sensor. Missing evidence and unoccupied seats
-do not count. New sensor readings can revise the latest combined sample without
-adding observations. The rolling minute uses the latest picture per second and
-requires ten valid samples with at least half drowsy.
+as awake. A sample counts as drowsy only when both the sensor and camera indicate
+drowsiness; missing camera measurements do not confirm a drowsy sensor reading.
+Missing evidence and unoccupied seats do not count. New sensor readings can revise
+the latest combined sample without adding observations. The rolling minute uses
+the latest picture per second and requires ten valid samples with at least half
+drowsy.
 
 Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
 Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
