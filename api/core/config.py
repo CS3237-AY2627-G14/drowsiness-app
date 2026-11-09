@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     frame_height: PositiveInt = 720
     max_frame_bytes: PositiveInt = 1_048_576
     max_pending_seconds: float = Field(default=1.0, gt=0)
+    drowsy_streak_seconds: PositiveInt = 5
+    awake_streak_seconds: PositiveInt = 3
+    detection_unknown_timeout_seconds: PositiveInt = 5
     ear_threshold: float = Field(default=0.21, gt=0)
     fatigue_threshold: float = Field(default=0.65, gt=0, le=1)
     mqtt_enabled: bool = True

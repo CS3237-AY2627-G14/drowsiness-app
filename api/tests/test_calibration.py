@@ -486,7 +486,14 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
         await frames.open_connection(connection_id)
         await frames.associate_seat(connection_id, 1)
         await facade.submit_raw_telemetry(raw())
+        from tests.helpers import MutableTimer
+
+        timer = MutableTimer()
+        frames._timer = timer
         for index in range(10):
+            timer.current_time = float(index)
+            row = frames._seat_rows[1]
+            frames._seat_rows[1] = row.model_copy(update={"received_at": timer.now()})
             frames._apply_frame_measurements(
                 FrameMeasurements(
                     connection_id=connection_id,
@@ -519,9 +526,7 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
     asyncio.run(run())
 
 
-def test_rehearsal_counts_sensor_alert_transitions_without_adding_observations() -> (
-    None
-):
+def test_rehearsal_sensor_revisions_cannot_restore_an_interrupted_streak() -> None:
     from modules.calibration.rehearsal import summarize_rehearsal
     from modules.processing.schemas import CameraObservation, SensorUpdate
 
@@ -570,7 +575,7 @@ def test_rehearsal_counts_sensor_alert_transitions_without_adding_observations()
     report = summarize_rehearsal(detail, Settings())
     assert report["camera_observations"] == 10
     assert report["comparisons"]["active"]["valid_observations"] == 9
-    assert report["comparisons"]["active"]["false_alert_activations"] == 1
+    assert report["comparisons"]["active"]["false_alert_activations"] == 0
 
 
 def test_disconnect_stops_recording_sensor_revisions_to_the_closed_stream(
