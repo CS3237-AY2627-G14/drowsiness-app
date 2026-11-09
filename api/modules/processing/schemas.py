@@ -92,6 +92,10 @@ class DrowsinessResult(BaseModel):
 
 class DetectionState(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
+    drowsy_since_ms: float | None = None
+    awake_since_ms: float | None = None
+    unknown_since_ms: float | None = None
+    last_camera_at_ms: float | None = None
     samples: tuple[DetectionSample, ...] = ()
     detection: DrowsinessResult | None = None
 
@@ -106,6 +110,25 @@ class ProcessingRecord(BaseModel):
     error: str | None = None
 
 
+class DetectionDebug(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    confirmed_state: Literal["monitoring", "drowsy", "unavailable"]
+    phase: Literal[
+        "stable", "entering_drowsy", "recovering", "unknown_grace", "unavailable"
+    ]
+    current_drowsy: bool | None
+    drowsy_seconds: float
+    awake_seconds: float
+    unknown_seconds: float
+    entry_required_seconds: int
+    recovery_required_seconds: int
+    unknown_timeout_seconds: int
+    camera_age_seconds: float | None
+    sensor_age_seconds: float | None
+    reason: str | None
+
+
 class ProcessingStatus(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     processed_frames: int
@@ -114,6 +137,7 @@ class ProcessingStatus(BaseModel):
     pending_frames: int
     in_flight: bool
     detection: DrowsinessResult | None
+    detection_debug: DetectionDebug | None = None
     mqtt_alert_sent_recently: bool = False
 
 

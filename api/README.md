@@ -121,12 +121,11 @@ packets. Reflash all student nodes with this API; older payloads are unsupported
 The API owns the corrected sensor truth table and learned seat 1 classifier.
 Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence
 (up to five seconds old) combines with camera measurements. Sensor-awake counts
-as awake. A sample counts as drowsy only when both the sensor and camera indicate
-drowsiness; missing camera measurements do not confirm a drowsy sensor reading.
-Missing evidence and unoccupied seats do not count. New sensor readings can revise
-the latest combined sample without adding observations. The rolling minute uses
-the latest picture per second and requires ten valid samples with at least half
-drowsy.
+as awake; sensor-drowsy counts when the camera agrees or has no face measurements.
+An awake camera overrides a drowsy sensor. Missing evidence and unoccupied seats
+do not count. New sensor readings can revise the latest combined sample without
+adding observations. The rolling minute uses the latest picture per second for
+diagnostics. Alerts require a continuous drowsy streak (five seconds by default).
 
 Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
 Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
@@ -174,3 +173,24 @@ camera. Load-test scripts live in `scripts/k6`; run their unit tests with
 `node --test scripts/k6/streaming.test.mjs` from `api/`.
 
 See [architecture](docs/architecture.md) for module responsibilities and data flow.
+
+### Continuous drowsiness alerts
+
+Set `DROWSINESS_DROWSY_STREAK_SECONDS` to a positive integer (default `5`) and
+restart the API. Alerts require that many elapsed seconds of uninterrupted
+drowsy camera classifications. Awake evidence resets pending entry immediately, but confirmed alerts require
+`DROWSINESS_AWAKE_STREAK_SECONDS` (default `3`) continuous awake seconds to clear.
+Unknown evidence resets pending transitions and retains confirmed state for
+`DROWSINESS_DETECTION_UNKNOWN_TIMEOUT_SECONDS` (default `5`) seconds before
+detection becomes unavailable. Repeated unknown readings do not restart expiry.
+Confirmed absence, disconnects, and model resets clear immediately. A camera observation gap
+greater than one second starts unknown time from that freshness deadline.
+Existing status checks enforce expiry even without new packets. Sensor
+reclassification cannot advance time or restore a reset streak. The rolling
+minute counts are diagnostic only; there is no minimum count or percentage for
+alert eligibility. Classification rules and sensor prediction cadence are unchanged.
+
+Development streaming diagnostics include a Detection debugging panel with the
+current classification, confirmed state, entry/recovery/unknown timers, configured
+thresholds, source ages, and inference queue activity. Diagnostics are sent only
+when the streaming connection requests them; the web client does this in dev mode.

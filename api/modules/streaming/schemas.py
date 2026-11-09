@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from modules.processing.facade import DrowsinessResult, MinuteSummary
+from modules.processing.facade import DetectionDebug, DrowsinessResult, MinuteSummary
 from modules.sessions.facade import PublisherSession
 
 
@@ -30,6 +30,7 @@ class StreamingRecord(BaseModel):
 
 class StreamDiagnostics(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
+    detection_state: DetectionDebug | None = None
     received_frames: int
     processed_frames: int
     replaced_frames: int

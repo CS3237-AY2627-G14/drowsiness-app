@@ -52,7 +52,7 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
             FrameBuffer(),
             FakeFramePredictor(),
             settings,
-            timer=timer,
+            timer=timer if timer is not None else MutableTimer(),
         )
         mqtt_router = SensorMqttRouter(
             settings, ProcessingFacade(processing_service), asyncio.Queue()
@@ -322,7 +322,7 @@ def test_expired_sensor_measurements_make_camera_drowsiness_unavailable() -> Non
             FrameBuffer(),
             FakeFramePredictor(),
             settings,
-            timer=timer,
+            timer=timer if timer is not None else MutableTimer(),
         )
         mqtt_router = SensorMqttRouter(
             settings, ProcessingFacade(processing_service), asyncio.Queue()
@@ -378,7 +378,7 @@ def _runtime(
         FrameBuffer(),
         FakeFramePredictor(),
         settings,
-        timer=timer,
+        timer=timer if timer is not None else MutableTimer(),
         status_publisher=publisher,
     )
     mqtt_router = SensorMqttRouter(
@@ -421,7 +421,14 @@ def _camera_frame(
 def _raise_alert(
     processing_service: FrameProcessingService, connection_id: UUID
 ) -> None:
+    timer = MutableTimer()
+    processing_service._timer = timer
     for index in range(10):
+        timer.current_time = float(index)
+        for seat_id, row in tuple(processing_service._seat_rows.items()):
+            processing_service._seat_rows[seat_id] = row.model_copy(
+                update={"received_at": timer.now()}
+            )
         processing_service._apply_frame_measurements(
             _camera_frame(connection_id, index + 1, float(index * 1000))
         )
@@ -707,36 +714,35 @@ def test_sensor_publish_intervals_are_per_seat_and_unaffected_by_camera_updates(
     asyncio.run(run())
 
 
-def test_sensor_alert_changes_bypass_throttling_and_reset_the_interval() -> None:
+def test_unknown_sensor_evidence_holds_then_expires_alert() -> None:
     async def run() -> None:
         publisher = RecordingStatusPublisher()
-        timer = MutableTimer()
-        processing_service, mqtt_router, _registry = _runtime(1, publisher, timer)
+        service, router, _registry = _runtime(1, publisher)
         connection_id = uuid4()
-        await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
-        _raise_alert(processing_service, connection_id)
+        await service.open_connection(connection_id)
+        await service.associate_seat(connection_id, 1)
+        await router._handle_message("drowsy/stud/1/data", _sensor_message(100, 420))
+        _raise_alert(service, connection_id)
+        timer = MutableTimer(9.25)
+        service._timer = timer
         publisher.updates.clear()
-
-        timer.current_time = 0.25
-        await mqtt_router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
-        cleared_alert = SeatStatusUpdate(
-            student=StudentSeatStatus(seat_id=1, drowsy=False), drowsy_seats=()
-        )
-        assert publisher.updates == [cleared_alert]
-
-        timer.current_time = 1.0
-        await mqtt_router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
-        assert publisher.updates == [cleared_alert]
-        timer.current_time = 1.25
-        await mqtt_router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
-        assert publisher.updates == [
-            cleared_alert,
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False)),
-        ]
+        await router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
+        status = await service.get_status(connection_id)
+        assert status.detection is not None and status.detection.alert
+        assert status.detection_debug is not None
+        assert status.detection_debug.phase == "unknown_grace"
+        assert status.detection_debug.confirmed_state == "drowsy"
+        assert status.detection_debug.current_drowsy is None
+        timer.current_time = 14.25
+        expired = await service.get_status(connection_id)
+        assert expired.detection is None
+        assert expired.detection_debug is not None
+        assert expired.detection_debug.confirmed_state == "unavailable"
+        assert expired.detection_debug.unknown_seconds >= 5
+        assert publisher.updates[-1].drowsy_seats == ()
+        count = len(publisher.updates)
+        await service.get_status(connection_id)
+        assert len(publisher.updates) == count
 
     asyncio.run(run())
 
