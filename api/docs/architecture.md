@@ -117,3 +117,19 @@ See [the operator guide](../../docs/sensor-calibration.md).
 The browser captures and publishes camera frames over the streaming socket.
 Connection and encoding errors stop publishing but keep the local camera preview
 available for retry.
+
+### Continuous drowsiness alerts
+
+Set `DROWSINESS_DROWSY_STREAK_SECONDS` to a positive integer (default `5`) and
+restart the API. Alerts require that many elapsed seconds of uninterrupted
+drowsy camera classifications. Awake evidence resets pending entry immediately, but confirmed alerts require
+`DROWSINESS_AWAKE_STREAK_SECONDS` (default `3`) continuous awake seconds to clear.
+Unknown evidence resets pending transitions and retains confirmed state for
+`DROWSINESS_DETECTION_UNKNOWN_TIMEOUT_SECONDS` (default `5`) seconds before
+detection becomes unavailable. Repeated unknown readings do not restart expiry.
+Confirmed absence, disconnects, and model resets clear immediately. A camera observation gap
+greater than one second starts unknown time from that freshness deadline.
+Existing status checks enforce expiry even without new packets. Sensor
+reclassification cannot advance time or restore a reset streak. The rolling
+minute counts are diagnostic only; there is no minimum count or percentage for
+alert eligibility. Classification rules and sensor prediction cadence are unchanged.

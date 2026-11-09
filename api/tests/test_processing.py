@@ -260,6 +260,8 @@ def test_scheduler_failure_is_observed_instead_of_silently_stalling(
             state: DetectionState,
             measurements: FrameMeasurements,
             settings: Settings,
+            *,
+            now_ms: float | None = None,
         ) -> DetectionState:
             failed.set()
             raise RuntimeError("Broken detection rule")

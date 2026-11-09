@@ -3,8 +3,7 @@ import type { DetectionStatusProps } from '../PublishPage.types'
 const getDetectionLabel = (
   detection: DetectionStatusProps['detection'],
 ): string => {
-  if (!detection) return 'Waiting for detection'
-  if (detection.minute.valid_samples < 10) return 'Gathering observations'
+  if (!detection) return 'Detection unavailable'
   return detection.alert ? 'Drowsiness detected' : 'Monitoring'
 }
 
@@ -32,7 +31,7 @@ export const DetectionStatus = ({
 }: DetectionStatusProps) => {
   const minute = detection?.minute
   const label = getDetectionLabel(detection)
-  const validSampleProgress = minute ? `${minute.valid_samples} / 10` : '—'
+  const validSampleProgress = minute ? `${minute.valid_samples} / 60` : '—'
   const drowsySampleCount = minute
     ? `${minute.drowsy_samples} of ${minute.valid_samples} valid`
     : '—'
@@ -49,7 +48,7 @@ export const DetectionStatus = ({
       <h2 className="text-lg font-semibold">{label}</h2>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
-          <dt>Valid samples (10 minimum)</dt>
+          <dt>Valid seconds in the last minute</dt>
           <dd>{validSampleProgress}</dd>
         </div>
         <div>
@@ -99,13 +98,16 @@ export const DetectionStatus = ({
         </div>
       </dl>
       <p className="mt-4 text-xs text-[var(--sea-ink-soft)]">
-        One picture per second counts toward the minute. An alert needs at least
-        10 valid pictures, with half or more showing signs of drowsiness.
-        Missing sensor readings and unoccupied seats do not count. A
-        backend-derived sensor drowsy result is counted as drowsy when the
-        camera also detects drowsiness or no face is detected; a detected awake
-        face overrides the sensor gate. The MQTT indicator reflects this seat’s
-        successful alert publication to the broker in the last 10 seconds.
+        The alarm requires uninterrupted drowsiness for the configured duration
+        (five seconds by default). Clearing requires continuous awake evidence
+        (three seconds by default). Unknown evidence retains the confirmed state
+        briefly, then expires detection (five seconds by default). Minute counts
+        show historical activity and do not trigger the alarm. Missing sensor
+        readings and unoccupied seats do not count. A backend-derived sensor
+        drowsy result is counted as drowsy when the camera also detects
+        drowsiness or no face is detected; a detected awake face overrides the
+        sensor gate. The MQTT indicator reflects this seat’s successful alert
+        publication to the broker in the last 10 seconds.
       </p>
       <a className="text-sm underline" href="/calibration">
         Open sensor calibration

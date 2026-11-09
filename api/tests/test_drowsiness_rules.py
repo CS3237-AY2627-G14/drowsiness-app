@@ -30,7 +30,7 @@ def observe(
     return evaluate_measurements(record, measurements, settings)
 
 
-def test_minute_alert_requires_10_valid_samples_and_at_least_half_drowsy() -> None:
+def test_historical_majority_cannot_trigger_on_an_awake_frame() -> None:
     record = DetectionState()
     for index in range(10):
         probability = 0.9 if index < 5 else 0.1
@@ -44,7 +44,7 @@ def test_minute_alert_requires_10_valid_samples_and_at_least_half_drowsy() -> No
     assert record.detection.minute.valid_samples == 10
     assert record.detection.minute.drowsy_samples == 5
     assert record.detection.minute.unavailable_samples == 50
-    assert record.detection.alert
+    assert not record.detection.alert
     record = observe(record, 43000.0)
     assert record.detection is not None and not record.detection.alert
 
@@ -94,22 +94,21 @@ def test_no_face_does_not_count_as_awake_and_alert_expires_with_history() -> Non
     for index in range(10):
         record = observe(record, float(index * 1000), probability=0.9)
     record = observe(
-        record, 11000.0, left=None, right=None, probability=None, sensor_drowsy=True
+        record, 10000.0, left=None, right=None, probability=None, sensor_drowsy=True
     )
     assert record.detection is not None
     assert record.detection.alert and not record.detection.face_detected
     assert record.detection.minute.valid_samples == 11
     record = observe(
         record,
-        70000.0,
+        69999.0,
         left=None,
         right=None,
         probability=None,
         sensor_drowsy=None,
     )
-    assert record.detection is not None and not record.detection.alert
-    assert record.detection.minute.valid_samples == 1
-    assert record.detection.minute.unavailable_samples == 59
+    assert record.detection is None
+    assert record.drowsy_since_ms is None
 
 
 def test_eye_and_cnn_signals_combine_without_sharing_camera_history() -> None:
@@ -218,3 +217,129 @@ def test_sensor_and_camera_results_are_fused(
     assert result.detection is not None
     assert result.detection.minute.valid_samples == expected_valid_samples
     assert result.detection.minute.drowsy_samples == expected_drowsy
+
+
+@pytest.mark.parametrize("interval_ms", [100, 500, 1000])
+def test_streak_uses_elapsed_time_not_frame_count(interval_ms: int) -> None:
+    state = DetectionState()
+    for timestamp in range(0, 5001, interval_ms):
+        state = observe(state, float(timestamp), probability=0.9)
+        assert state.detection is not None
+        assert state.detection.alert is (timestamp >= 5000)
+    assert state.detection is not None
+    assert state.detection.minute.valid_samples == 6
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_interruption_within_second_cannot_be_overwritten(unknown: bool) -> None:
+    state = DetectionState()
+    for timestamp in range(0, 5001, 500):
+        state = observe(state, float(timestamp), probability=0.9)
+    state = observe(
+        state, 5100.0, probability=0.1, sensor_drowsy=None if unknown else True
+    )
+    assert state.drowsy_since_ms is None
+    assert state.detection is not None and state.detection.alert
+    state = observe(state, 5200.0, probability=0.9)
+    assert state.drowsy_since_ms == 5200.0
+    assert state.detection is not None and state.detection.alert
+
+
+def test_gap_breaks_streak_and_reset_state_discards_it() -> None:
+    state = DetectionState()
+    for timestamp in range(0, 5001, 1000):
+        state = observe(state, float(timestamp), probability=0.9)
+    assert state.detection is not None and state.detection.alert
+    state = observe(state, 6001.0, probability=0.9)
+    assert state.drowsy_since_ms == 6001.0
+    assert state.detection is not None and state.detection.alert
+    assert DetectionState().drowsy_since_ms is None
+
+
+def test_sensor_reclassification_does_not_advance_or_restore_streak() -> None:
+    from modules.processing.utils.drowsiness_rules import reclassify_latest_sample
+
+    state = DetectionState()
+    for timestamp in range(0, 5001, 1000):
+        state = observe(state, float(timestamp), probability=0.9)
+    measurements = FrameMeasurements(
+        connection_id=uuid4(),
+        frame_id=6,
+        captured_at_ms=5000.0,
+        left_ear=0.1,
+        right_ear=0.1,
+        present=True,
+        sensor_drowsy=None,
+    )
+    state = reclassify_latest_sample(state, measurements, Settings())
+    assert state.drowsy_since_ms is None
+    assert state.detection is not None and state.detection.alert
+    recovered = measurements.model_copy(update={"sensor_drowsy": True})
+    for _ in range(20):
+        state = reclassify_latest_sample(state, recovered, Settings())
+        assert state.drowsy_since_ms == 5000.0
+        assert state.detection is not None and state.detection.alert
+    assert len(state.samples) == 6
+
+
+def test_configured_streak_threshold_and_validation() -> None:
+    from pydantic import ValidationError
+
+    for invalid in (0, -1):
+        with pytest.raises(ValidationError):
+            Settings(drowsy_streak_seconds=invalid)
+    state = DetectionState()
+    settings = Settings(drowsy_streak_seconds=2)
+    for timestamp in (0.0, 999.0, 1999.0, 2000.0):
+        measurement = FrameMeasurements(
+            connection_id=uuid4(),
+            frame_id=1,
+            captured_at_ms=timestamp,
+            left_ear=0.1,
+            right_ear=0.1,
+            present=True,
+            sensor_drowsy=True,
+        )
+        state = evaluate_measurements(state, measurement, settings)
+        assert state.detection is not None
+        assert state.detection.alert is (timestamp >= 2000)
+
+
+def test_recovery_requires_continuous_awake_evidence() -> None:
+    state = DetectionState()
+    for timestamp in range(0, 5001, 1000):
+        state = observe(state, float(timestamp), probability=0.9)
+    for awake_at in (5100.0, 6100.0, 7100.0, 8099.0):
+        state = observe(state, awake_at, probability=0.1)
+        assert state.detection is not None and state.detection.alert
+    state = observe(state, 8100.0, probability=0.1)
+    assert state.detection is not None and not state.detection.alert
+
+
+def test_unknown_timeout_does_not_restart_with_more_unknown_frames() -> None:
+    state = DetectionState()
+    for timestamp in range(0, 5001, 1000):
+        state = observe(state, float(timestamp), probability=0.9)
+    for unknown_at in (5100.0, 6100.0, 7100.0, 8100.0, 9100.0, 10099.0):
+        state = observe(state, unknown_at, sensor_drowsy=None)
+        assert state.detection is not None and state.detection.alert
+        assert state.unknown_since_ms == 5100.0
+    state = observe(state, 10100.0, sensor_drowsy=None)
+    assert state.detection is None
+    state = observe(state, 10150.0, sensor_drowsy=None)
+    assert state.detection is None
+    state = observe(state, 10200.0, probability=0.9)
+    assert state.detection is not None and not state.detection.alert
+    assert state.drowsy_since_ms == 10200.0
+
+
+def test_drowsiness_cancels_recovery_and_absence_clears_immediately() -> None:
+    state = DetectionState()
+    for timestamp in range(0, 5001, 1000):
+        state = observe(state, float(timestamp), probability=0.9)
+    state = observe(state, 5100.0, probability=0.1)
+    state = observe(state, 5200.0, probability=0.9)
+    assert state.awake_since_ms is None
+    state = observe(state, 5300.0, present=False)
+    assert state.detection is not None and not state.detection.alert
+    assert state.drowsy_since_ms is None and state.awake_since_ms is None

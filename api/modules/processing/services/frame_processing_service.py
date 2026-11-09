@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -18,6 +19,7 @@ from modules.processing.publishing import (
 from modules.processing.recording import MeasurementRecorder
 from modules.processing.repositories.registry import ProcessingRegistry
 from modules.processing.schemas import (
+    DetectionDebug,
     DetectionState,
     FrameInput,
     FrameMeasurements,
@@ -33,6 +35,7 @@ from modules.processing.services.sensor_classification_service import (
 )
 from modules.processing.utils.drowsiness_rules import (
     evaluate_measurements,
+    expire_detection,
     reclassify_latest_sample,
 )
 
@@ -215,7 +218,7 @@ class FrameProcessingService:
                 }
             )
             detection_state = reclassify_latest_sample(
-                detection_state, measured, self._settings
+                detection_state, measured, self._settings, now_ms=received_at * 1000
             )
         return row.model_copy(
             update={
@@ -263,6 +266,22 @@ class FrameProcessingService:
 
     async def get_status(self, connection_id: UUID) -> ProcessingStatus:
         record = self._get_active_record(connection_id)
+        expired = expire_detection(
+            record.detection_state, self._timer.now() * 1000, self._settings
+        )
+        if expired != record.detection_state:
+            previous_drowsy = self._drowsy_seat_ids()
+            record = record.model_copy(update={"detection_state": expired})
+            self._processing_registry.save(connection_id, record)
+            if record.seat_id is not None and record.seat_id in self._seat_rows:
+                row = self._seat_rows[record.seat_id]
+                self._seat_rows[record.seat_id] = row.model_copy(
+                    update={"detection_state": expired}
+                )
+                if expired.detection is None:
+                    self._publish_seat(
+                        record.seat_id, previous_drowsy, sensor_driven=False
+                    )
         last_published_at_ms = (
             self._status_publisher.get_last_alert_published_at(record.seat_id)
             if self._status_publisher is not None and record.seat_id is not None
@@ -275,8 +294,77 @@ class FrameProcessingService:
             pending_frames=self._frame_buffer.pending_count(connection_id),
             in_flight=self._frame_buffer.is_in_flight(connection_id),
             detection=record.detection_state.detection,
+            detection_debug=self._build_detection_debug(record),
             mqtt_alert_sent_recently=last_published_at_ms is not None
             and time.time_ns() / 1_000_000 - last_published_at_ms < 10_000,
+        )
+
+    def _build_detection_debug(self, record: ProcessingRecord) -> DetectionDebug:
+        state = record.detection_state
+        now_ms = self._timer.now() * 1000
+        detection = state.detection
+        row = (
+            self._seat_rows.get(record.seat_id) if record.seat_id is not None else None
+        )
+        camera_age = (
+            max(0.0, (now_ms - state.last_camera_at_ms) / 1000)
+            if state.last_camera_at_ms is not None
+            else None
+        )
+        sensor_age = (
+            max(0.0, self._timer.now() - row.received_at)
+            if row is not None and row.received_at is not None
+            else None
+        )
+        confirmed: Literal["monitoring", "drowsy", "unavailable"]
+        phase: Literal[
+            "stable", "entering_drowsy", "recovering", "unknown_grace", "unavailable"
+        ]
+        if detection is None:
+            confirmed, phase = "unavailable", "unavailable"
+        else:
+            confirmed = "drowsy" if detection.alert else "monitoring"
+            if state.unknown_since_ms is not None:
+                phase = "unknown_grace"
+            elif detection.alert and state.awake_since_ms is not None:
+                phase = "recovering"
+            elif not detection.alert and state.drowsy_since_ms is not None:
+                phase = "entering_drowsy"
+            else:
+                phase = "stable"
+        reason = None
+        if camera_age is not None and camera_age > 1:
+            reason = "camera_stale"
+        elif row is not None and row.sensor_measurements is not None:
+            reason = row.sensor_measurements.unavailable_reason
+        elif detection is None:
+            reason = "waiting_for_camera"
+        current = (
+            state.samples[-1].drowsy
+            if state.samples
+            and state.unknown_since_ms is None
+            and detection is not None
+            else None
+        )
+        return DetectionDebug(
+            confirmed_state=confirmed,
+            phase=phase,
+            current_drowsy=current,
+            drowsy_seconds=max(0.0, (now_ms - state.drowsy_since_ms) / 1000)
+            if state.drowsy_since_ms is not None
+            else 0.0,
+            awake_seconds=max(0.0, (now_ms - state.awake_since_ms) / 1000)
+            if state.awake_since_ms is not None
+            else 0.0,
+            unknown_seconds=max(0.0, (now_ms - state.unknown_since_ms) / 1000)
+            if state.unknown_since_ms is not None
+            else 0.0,
+            entry_required_seconds=self._settings.drowsy_streak_seconds,
+            recovery_required_seconds=self._settings.awake_streak_seconds,
+            unknown_timeout_seconds=self._settings.detection_unknown_timeout_seconds,
+            camera_age_seconds=camera_age,
+            sensor_age_seconds=sensor_age,
+            reason=reason,
         )
 
     async def close_connection(self, connection_id: UUID) -> None:
@@ -364,6 +452,8 @@ class FrameProcessingService:
                     None,
                 )
                 if work is not None and work.generation in (-1, self._generation):
+                    if self._timer.now() - work.received_at > 1.0:
+                        continue
                     self._apply_frame_measurements(measurements)
                     if (
                         self._measurement_recorder is not None
@@ -392,7 +482,10 @@ class FrameProcessingService:
         previous_drowsy = self._drowsy_seat_ids() if seat_id is not None else ()
         if seat_id is None:
             detection_state = evaluate_measurements(
-                record.detection_state, measurements, self._settings
+                record.detection_state,
+                measurements,
+                self._settings,
+                now_ms=self._timer.now() * 1000,
             )
         else:
             detection_state = self._update_seat_detection(seat_id, measurements)
@@ -412,7 +505,10 @@ class FrameProcessingService:
         row = self._seat_rows.get(seat_id, SeatRow())
         measured = self._with_fresh_sensor(seat_id, measurements)
         detection_state = evaluate_measurements(
-            row.detection_state, measured, self._settings
+            row.detection_state,
+            measured,
+            self._settings,
+            now_ms=self._timer.now() * 1000,
         )
         updated_row = row.model_copy(
             update={

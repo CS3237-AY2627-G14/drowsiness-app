@@ -3,6 +3,7 @@ from uuid import UUID
 from modules.processing.exceptions import ProcessingException
 from modules.processing.schemas import (
     CameraObservation,
+    DetectionDebug,
     DetectionState,
     DrowsinessResult,
     FrameInput,
@@ -36,6 +37,7 @@ __all__ = [
     "LiveTelemetry",
     "FrameMeasurements",
     "DetectionState",
+    "DetectionDebug",
     "extract_features",
     "baseline_result",
     "classify_frame",

@@ -71,7 +71,9 @@ def summarize_rehearsal(detail: RecordingDetail, settings: Settings) -> dict[str
                     classify_frame(revised, settings) is not None
                 ) - int(previous_valid)
                 frame = revised
-                state = reclassify_latest_sample(state, revised, settings)
+                state = reclassify_latest_sample(
+                    state, revised, settings, now_ms=update.received_at * 1000
+                )
                 if state.detection and state.detection.alert and not previous_alert:
                     onsets.append(update.received_at)
                     if any(

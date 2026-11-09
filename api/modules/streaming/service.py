@@ -117,6 +117,7 @@ class StreamingService:
         now = self._timer.now()
         elapsed = max(now - record.sample_at, 0.001)
         diagnostics = StreamDiagnostics(
+            detection_state=processing_status.detection_debug,
             received_frames=record.received_frames,
             processed_frames=processing_status.processed_frames,
             replaced_frames=processing_status.replaced_frames,

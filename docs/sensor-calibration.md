@@ -167,8 +167,8 @@ A sample counts as drowsy only when occupied and the sensor gate passes, plus
 either CNN fatigue probability ≥0.65, both EARs <0.21, or no usable face in a
 successfully processed frame. Sensor-awake suppresses the sample; unknown
 evidence and unoccupied seats do not count. Camera disconnects do not create
-no-face samples. An alert requires ≥10 valid seconds and ≥50% drowsy in the
-rolling minute. Per-seat alert status publishes to `drowsy/stud/1/result`, QoS 1, and the
+no-face samples. An alert requires a continuous drowsy streak (five seconds by default);
+rolling-minute counts are diagnostic only. Per-seat alert status publishes to `drowsy/stud/1/result`, QoS 1, and the
 retained lecturer list on `drowsy/lect/result` tracks all active seats.
 
 For a correction, record the failing posture, adjust labels where necessary,
@@ -231,3 +231,19 @@ available for retraining or later rollback.
 Run the checks documented in the project READMEs. Software tests do not replace
 the physical end-to-end rehearsal. See the dated [system changelog](../changelogs/2026-11-02-sensor-calibration/system.md)
 for implementation and verification notes.
+
+### Continuous drowsiness alerts
+
+Set `DROWSINESS_DROWSY_STREAK_SECONDS` to a positive integer (default `5`) and
+restart the API. Alerts require that many elapsed seconds of uninterrupted
+drowsy camera classifications. Awake evidence resets pending entry immediately, but confirmed alerts require
+`DROWSINESS_AWAKE_STREAK_SECONDS` (default `3`) continuous awake seconds to clear.
+Unknown evidence resets pending transitions and retains confirmed state for
+`DROWSINESS_DETECTION_UNKNOWN_TIMEOUT_SECONDS` (default `5`) seconds before
+detection becomes unavailable. Repeated unknown readings do not restart expiry.
+Confirmed absence, disconnects, and model resets clear immediately. A camera observation gap
+greater than one second starts unknown time from that freshness deadline.
+Existing status checks enforce expiry even without new packets. Sensor
+reclassification cannot advance time or restore a reset streak. The rolling
+minute counts are diagnostic only; there is no minimum count or percentage for
+alert eligibility. Classification rules and sensor prediction cadence are unchanged.
