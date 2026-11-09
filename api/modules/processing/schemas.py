@@ -98,7 +98,7 @@ class DetectionState(BaseModel):
 
 class ProcessingRecord(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
-    seat_id: int | None = None
+    seat_id: str | None = None
     processed_frames: int = 0
     replaced_frames: int = 0
     stale_frames: int = 0

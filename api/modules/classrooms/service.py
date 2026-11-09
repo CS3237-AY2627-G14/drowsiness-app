@@ -18,7 +18,7 @@ class ClassroomsService:
     async def list_seats(self, room_id: int) -> list[SeatInfo]:
         return await self._seat_repository.list_seats(room_id)
 
-    async def get_seat(self, seat_id: int) -> SeatInfo | None:
+    async def get_seat(self, seat_id: str) -> SeatInfo | None:
         return await self._seat_repository.get_seat(seat_id)
 
     async def list_classrooms(self) -> list[ClassroomInfo]:

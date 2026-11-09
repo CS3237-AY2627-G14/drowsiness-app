@@ -34,7 +34,7 @@ class StreamingService:
         self._timer = timer if timer is not None else MonotonicTimer()
         self._closing: dict[UUID, asyncio.Task[None]] = {}
 
-    async def open_stream(self, *, token: str, seat_id: int) -> PublisherSession:
+    async def open_stream(self, *, token: str, seat_id: str) -> PublisherSession:
         try:
             publisher = await self._sessions_facade.open_publisher(
                 token=token, seat_id=seat_id

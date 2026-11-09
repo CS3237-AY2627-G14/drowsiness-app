@@ -25,7 +25,7 @@ const createTestStream = () => {
   const stream = createFrameStream(callbacks)
   return { stream, callbacks }
 }
-const target = { seatId: 1, token: 'test-token' }
+const target = { seatId: '1', token: 'test-token' }
 
 beforeEach(() => {
   vi.useFakeTimers()

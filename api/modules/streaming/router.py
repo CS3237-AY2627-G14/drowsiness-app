@@ -62,7 +62,7 @@ class StreamingSocketRouter:
             connection_id=publisher.connection_id, diagnostics=credentials.diagnostics
         )
         logger.info(
-            "Stream connected seat_id=%d connection_id=%s",
+            "Stream connected seat_id=%s connection_id=%s",
             credentials.seat_id,
             publisher.connection_id,
         )

@@ -15,10 +15,10 @@ export type CameraPreviewProps = {
 export type SeatSelectorProps = {
   classrooms: Classroom[]
   room: Classroom
-  seatId: number | null
+  seatId: string | null
   disabled: boolean
   onRoomChange: (id: number) => void
-  onSeatChange: (id: number) => void
+  onSeatChange: (id: string) => void
 }
 
 export type PublishControlsProps = {
@@ -39,7 +39,7 @@ export type ConnectionStatusProps = { phase: StreamingPhase }
 
 export type StreamMetricsProps = { metrics: StreamDiagnosticsSnapshot | null }
 
-export type PublishTokenOverride = { seatId: number; token: string }
+export type PublishTokenOverride = { seatId: string; token: string }
 
 export type PublishSelection = {
   room: Classroom | undefined

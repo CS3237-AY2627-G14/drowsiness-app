@@ -207,7 +207,7 @@ export default () => {
     if (stopping) return;
     if (data.startsWith("0")) {
       const authentication = {
-        seat_id: seat,
+        seat_id: String(seat),
         token: `demo-room-101-seat-${seat}`,
         diagnostics: true,
       };

@@ -14,7 +14,7 @@ from tests.helpers import MutableClock
 
 HEADERS = {"origin": "http://localhost:3000", "upgrade": "websocket"}
 ENDPOINT = "/api/socket.io/?EIO=4&transport=websocket"
-AUTH = {"seat_id": 1, "token": "demo-room-101-seat-1"}
+AUTH = {"seat_id": "1", "token": "demo-room-101-seat-1"}
 
 
 class SocketIOConnection:
@@ -120,13 +120,15 @@ def test_diagnostics_are_explicitly_requested(client: TestClient) -> None:
 @pytest.mark.parametrize(
     "payload",
     [
-        {"seat_id": 1, "token": "invalid"},
-        {"seat_id": 1, "token": "demo-room-101-seat-2"},
-        {"seat_id": 1},
+        {"seat_id": "1", "token": "invalid"},
+        {"seat_id": "1", "token": "demo-room-101-seat-2"},
+        {"seat_id": "1"},
         {},
-        {"seat_id": "1", "token": "demo-room-101-seat-1"},
-        {"seat_id": 1, "token": "demo-room-101-seat-1", "extra": True},
-        {"seat_id": 0, "token": "demo-room-101-seat-1"},
+        {"seat_id": 1, "token": "demo-room-101-seat-1"},
+        {"seat_id": "1", "token": "demo-room-101-seat-1", "extra": True},
+        {"seat_id": "A/1", "token": "demo-room-101-seat-1"},
+        {"seat_id": "", "token": "demo-room-101-seat-1"},
+        {"seat_id": "0", "token": "demo-room-101-seat-1"},
     ],
 )
 def test_denied_auth(client: TestClient, payload: dict[str, object]) -> None:
@@ -220,7 +222,7 @@ def test_credentials_are_not_logged(
 ) -> None:
     token = "private-credential"
     with connect(client) as socket:
-        socket.authenticate({"seat_id": 1, "token": token})
+        socket.authenticate({"seat_id": "1", "token": token})
         socket.receive()
     assert token not in caplog.text
 

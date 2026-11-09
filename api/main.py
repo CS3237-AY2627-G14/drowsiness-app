@@ -190,7 +190,11 @@ def create_app(
                     calibration_service
                 )
                 sensor_mqtt_router = SensorMqttRouter(
-                    configuration, processing_facade, status_updates, status_publisher
+                    configuration,
+                    processing_facade,
+                    status_updates,
+                    status_publisher,
+                    seat_ids=[seat.id for seat in seats],
                 )
                 async with AsyncExitStack() as shutdown_stack:
                     shutdown_stack.push_async_callback(frame_processing_service.stop)

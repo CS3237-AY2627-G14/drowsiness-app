@@ -6,7 +6,7 @@ def create_demo_classroom(
 ) -> tuple[list[RoomInfo], list[SeatInfo]]:
     rooms = [RoomInfo(id=101, name="Room 101")]
     seats = [
-        SeatInfo(id=number, room_id=101, seat_number=number)
+        SeatInfo(id=str(number), room_id=101, seat_number=number)
         for number in range(1, seat_count + 1)
     ]
     return rooms, seats

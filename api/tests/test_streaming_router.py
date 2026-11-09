@@ -15,7 +15,7 @@ from modules.streaming.router import StreamingSocketRouter
 from modules.streaming.utils.parse_frame import FRAME_HEADER
 from tests.helpers import MutableClock, MutableTimer, build_streaming_runtime
 
-AUTH = {"seat_id": 1, "token": "demo-room-101-seat-1"}
+AUTH = {"seat_id": "1", "token": "demo-room-101-seat-1"}
 ENVIRON = {"HTTP_ORIGIN": "http://localhost:3000"}
 
 
@@ -141,7 +141,7 @@ def test_overlapping_terminal_paths_cleanup_once(
         assert not router._cleanups
         assert not router._closing
         replacement = await runtime.streaming_service.open_stream(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.streaming_service.close_stream(replacement.connection_id)
         await router.stop()
@@ -196,7 +196,7 @@ def test_cancelled_disconnect_finishes_cleanup(
         assert not router._cleanups
         assert runtime.processing_registry.get(connection_id) is None
         replacement = await runtime.sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.sessions_facade.close_publisher(replacement.connection_id)
         await router.stop()
@@ -240,7 +240,7 @@ def test_shutdown_waits_for_pending_disconnect(
         assert not router._cleanups
         assert not router._tasks
         replacement = await runtime.sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.sessions_facade.close_publisher(replacement.connection_id)
 

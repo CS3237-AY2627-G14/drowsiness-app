@@ -25,6 +25,9 @@ and errors, so internals can change freely. The import rules are in [AGENTS.md](
 
 ## Ownership
 
+Seat IDs are case-sensitive alphanumeric strings. Room IDs and physical seat
+numbers remain numeric. MQTT data topics map directly to registered seat IDs.
+
 Three identifiers carry through the system: a seat, a session (its authorization
 record), and a connection (one publishing connection).
 

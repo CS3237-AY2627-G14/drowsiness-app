@@ -17,7 +17,7 @@ class StreamingFacade:
     def __init__(self, streaming_service: StreamingService) -> None:
         self._streaming_service = streaming_service
 
-    async def open_stream(self, *, token: str, seat_id: int) -> PublisherSession:
+    async def open_stream(self, *, token: str, seat_id: str) -> PublisherSession:
         return await self._streaming_service.open_stream(token=token, seat_id=seat_id)
 
     async def submit_frame(self, connection_id: UUID, frame: FrameInput) -> None:

@@ -12,7 +12,7 @@ class StreamSessionRepository(Protocol):
 class InMemoryStreamSessionRepository:
     def __init__(self, sessions: list[StreamSessionRecord]) -> None:
         self._sessions: dict[str, StreamSessionRecord] = {}
-        open_seats: set[int] = set()
+        open_seats: set[str] = set()
         for session in sessions:
             if session.token_hash in self._sessions:
                 raise ValueError("Session token hashes must be unique")

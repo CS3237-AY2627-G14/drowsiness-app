@@ -20,7 +20,7 @@ credentials and the MQTT URI of the API computer, for example
 is ignored by Git. Upload normally and open Serial Monitor at 115200 baud.
 Hardware wiring is assumed complete and correct.
 
-The node publishes one packet every 200 ms to `drowsy/stud/1/data`:
+The node publishes one packet every 200 ms to `stud/1/data`:
 
 ```json
 {"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
@@ -168,8 +168,8 @@ either CNN fatigue probability ≥0.65, both EARs <0.21, or no usable face in a
 successfully processed frame. Sensor-awake suppresses the sample; unknown
 evidence and unoccupied seats do not count. Camera disconnects do not create
 no-face samples. An alert requires ≥10 valid seconds and ≥50% drowsy in the
-rolling minute. Per-seat alert status publishes to `drowsy/stud/1/result`, QoS 1, and the
-retained lecturer list on `drowsy/lect/result` tracks all active seats.
+rolling minute. Per-seat alert status publishes to `stud/1/result`, QoS 1, and the
+retained lecturer list on `lect/result` tracks all active seats.
 
 For a correction, record the failing posture, adjust labels where necessary,
 select old plus new development recordings, and train again. Dataset snapshots
@@ -220,7 +220,7 @@ available for retraining or later rollback.
 
 | Symptom | Check |
 | --- | --- |
-| No telemetry | Firmware Wi-Fi/broker URI, broker reachability, exact `student1` topic, schema, MQTT enabled |
+| No telemetry | Firmware Wi-Fi/broker URI, broker reachability, matching `stud/<seat_id>/data` topic, schema, MQTT enabled |
 | Controls unavailable | Run initialization from `api/`, then restart; check directory configuration |
 | Unknown sensor result | Missing lower measurement, missing echo in baseline mode, insufficient window, unoccupied seat, or stale packets |
 | Training fails | Three development recordings, both classes in each, stopped recordings, valid labelled windows |

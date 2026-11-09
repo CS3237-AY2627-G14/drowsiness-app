@@ -28,7 +28,7 @@ class SessionsService:
         self._clock = clock
         self._max_publishers = max_publishers
 
-    async def open_publisher(self, *, token: str, seat_id: int) -> PublisherSession:
+    async def open_publisher(self, *, token: str, seat_id: str) -> PublisherSession:
         token_hash = hash_token(token)
         session = await self._stream_session_repository.get_by_token_hash(token_hash)
         if (

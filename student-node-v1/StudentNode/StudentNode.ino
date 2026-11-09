@@ -47,8 +47,8 @@ const unsigned long SENSOR_MS = 200;    // read sensors every 200 ms
 const unsigned long PUBLISH_MS = 200;
 const unsigned long DEBUG_MS = 500;     // debug print every 0.5 s
 
-const char alertTopic[] = "drowsy/stud/" SEAT_ID "/result";
-const char dataTopic[] = "drowsy/stud/" SEAT_ID "/data";
+const char alertTopic[] = "stud/" SEAT_ID "/result";
+const char dataTopic[] = "stud/" SEAT_ID "/data";
 
 ESP32MQTTClient mqttClient;
 Adafruit_VL53L0X tof;

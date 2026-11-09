@@ -16,7 +16,7 @@ export const SeatSelector = ({
     onRoomChange(roomId)
   }
   const handleSeatChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const selectedId = Number(event.currentTarget.value)
+    const selectedId = event.currentTarget.value
     onSeatChange(selectedId)
   }
   return (

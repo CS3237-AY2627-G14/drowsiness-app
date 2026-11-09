@@ -25,7 +25,7 @@ def test_frame_admission_and_upload_metrics(
         timer = MutableTimer()
         runtime = build_streaming_runtime(clock, timer=timer)
         publisher = await runtime.streaming_service.open_stream(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         first = FrameInput(frame_id=1, captured_at_ms=100.0, jpeg=b"jpeg")
         await runtime.streaming_service.submit_frame(publisher.connection_id, first)
@@ -63,7 +63,7 @@ def test_failed_admission_does_not_increment_upload_counters(
     async def run() -> None:
         runtime = build_streaming_runtime(clock)
         publisher = await runtime.streaming_service.open_stream(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         monkeypatch.setattr(
             runtime.frame_processing_service,
@@ -109,12 +109,12 @@ def test_initialization_failure_removes_partial_state_and_releases_seat(
         )
         with pytest.raises(expected):
             await runtime.streaming_service.open_stream(
-                token="demo-room-101-seat-1", seat_id=1
+                token="demo-room-101-seat-1", seat_id="1"
             )
         assert runtime.processing_registry.get(opened[0]) is None
         assert runtime.streaming_registry.get(opened[0]) is None
         replacement = await runtime.sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.sessions_facade.close_publisher(replacement.connection_id)
 
@@ -142,7 +142,7 @@ def test_cancelled_initialization_releases_seat(
         )
         opening = asyncio.create_task(
             runtime.streaming_service.open_stream(
-                token="demo-room-101-seat-1", seat_id=1
+                token="demo-room-101-seat-1", seat_id="1"
             )
         )
         await asyncio.wait_for(started.wait(), 1)
@@ -152,7 +152,7 @@ def test_cancelled_initialization_releases_seat(
         assert runtime.processing_registry.get(opened[0]) is None
         assert runtime.streaming_registry.get(opened[0]) is None
         replacement = await runtime.sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.sessions_facade.close_publisher(replacement.connection_id)
 
@@ -165,7 +165,7 @@ def test_concurrent_close_finishes_once_despite_caller_cancellation(
     async def run() -> None:
         runtime = build_streaming_runtime(clock)
         publisher = await runtime.streaming_service.open_stream(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         started = asyncio.Event()
         finish = asyncio.Event()
@@ -204,7 +204,7 @@ def test_concurrent_close_finishes_once_despite_caller_cancellation(
         assert runtime.streaming_registry.get(publisher.connection_id) is None
         assert runtime.processing_registry.get(publisher.connection_id) is None
         replacement = await runtime.sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.sessions_facade.close_publisher(replacement.connection_id)
 
@@ -217,7 +217,7 @@ def test_processing_cleanup_failure_still_releases_seat(
     async def run() -> None:
         runtime = build_streaming_runtime(clock)
         publisher = await runtime.streaming_service.open_stream(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         close_connection = runtime.frame_processing_service.close_connection
 
@@ -231,7 +231,7 @@ def test_processing_cleanup_failure_still_releases_seat(
         with pytest.raises(RuntimeError, match="Cleanup failed"):
             await runtime.streaming_service.close_stream(publisher.connection_id)
         replacement = await runtime.sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await runtime.sessions_facade.close_publisher(replacement.connection_id)
 
@@ -262,7 +262,7 @@ def test_reconnect_does_not_receive_old_inflight_detection(clock: MutableClock) 
         runtime.frame_processing_service.start(1)
         try:
             first = await runtime.streaming_service.open_stream(
-                token="demo-room-101-seat-1", seat_id=1
+                token="demo-room-101-seat-1", seat_id="1"
             )
             frame = FrameInput(frame_id=1, captured_at_ms=1.0, jpeg=b"jpeg")
             await runtime.streaming_service.submit_frame(first.connection_id, frame)
@@ -270,7 +270,7 @@ def test_reconnect_does_not_receive_old_inflight_detection(clock: MutableClock) 
             await runtime.streaming_service.close_stream(first.connection_id)
             assert runtime.frame_buffer.is_in_flight(first.connection_id)
             replacement = await runtime.streaming_service.open_stream(
-                token="demo-room-101-seat-1", seat_id=1
+                token="demo-room-101-seat-1", seat_id="1"
             )
             assert replacement.session_id == first.session_id
             assert replacement.connection_id != first.connection_id

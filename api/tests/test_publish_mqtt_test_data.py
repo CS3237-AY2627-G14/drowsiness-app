@@ -12,7 +12,7 @@ def parse_arguments() -> argparse.Namespace:
     argument_parser = argparse.ArgumentParser(
         description="Publish raw sensor readings to the local broker."
     )
-    argument_parser.add_argument("--student", type=int, default=1)
+    argument_parser.add_argument("--student", default="1")
     argument_parser.add_argument("--upper-cm", type=int, default=7)
     argument_parser.add_argument("--lower-mm", type=int, default=150)
     argument_parser.add_argument("--back-raw", type=int, default=1000)
@@ -22,8 +22,12 @@ def parse_arguments() -> argparse.Namespace:
     argument_parser.add_argument("--count", type=int, default=10)
     argument_parser.add_argument("--interval", type=float, default=1.0)
     arguments = argument_parser.parse_args()
-    if arguments.student < 1:
-        argument_parser.error("--student must be at least 1")
+    if (
+        not arguments.student
+        or not arguments.student.isascii()
+        or not arguments.student.isalnum()
+    ):
+        argument_parser.error("--student must contain ASCII letters and digits")
     if not 1 <= arguments.port <= 65535:
         argument_parser.error("--port must be between 1 and 65535")
     if arguments.count < 1:

@@ -24,7 +24,7 @@ const char *pass = WIFI_PASSWORD;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 const char *server = MQTT_URI;
-const char *subscribeTopic = "drowsy/lect/result";
+const char *subscribeTopic = "lect/result";
 
 constexpr size_t ID_LIST_CAPACITY = 1280;
 constexpr uint32_t LCD_SCROLL_INTERVAL_MS = 500;
@@ -53,24 +53,13 @@ uint32_t alarmPhaseStartedAt = 0;
 
 bool appendId(JsonVariant value, char *destination, size_t capacity, size_t &length)
 {
-    char numberBuffer[24];
     const char *text = value.as<const char *>();
-
-    if (text == nullptr)
+    if (text == nullptr || *text == '\0') return false;
+    for (const char *character = text; *character; ++character)
     {
-        if (value.is<long>())
-        {
-            snprintf(numberBuffer, sizeof(numberBuffer), "%ld", value.as<long>());
-        }
-        else if (value.is<unsigned long>())
-        {
-            snprintf(numberBuffer, sizeof(numberBuffer), "%lu", value.as<unsigned long>());
-        }
-        else
-        {
-            return false;
-        }
-        text = numberBuffer;
+        if (!((*character >= 'A' && *character <= 'Z') ||
+              (*character >= 'a' && *character <= 'z') ||
+              (*character >= '0' && *character <= '9'))) return false;
     }
 
     const size_t textLength = strlen(text);
@@ -302,14 +291,9 @@ void onMqttConnect(esp_mqtt_client_handle_t client)
             size_t idsLength = 0;
             for (JsonVariant id : doc["drowsy_seats"].as<JsonArray>())
             {
-                if (!id.is<int>() || id.as<int>() <= 0)
-                {
-                    log_i("Seat IDs must be positive integers");
-                    return;
-                }
                 if (!appendId(id, newData.ids, sizeof(newData.ids), idsLength))
                 {
-                    log_i("Seat IDs exceed the display buffer");
+                    log_i("Invalid seat ID or display buffer exceeded");
                     return;
                 }
                 ++newData.numberStudents;

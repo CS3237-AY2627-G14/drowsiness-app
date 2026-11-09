@@ -26,7 +26,7 @@ export const usePublishTarget = (classrooms: Classroom[]) => {
     void navigate({ search: { room: roomId, seat: nextRoom?.seats[0]?.id } })
     setTokenOverride(null)
   }
-  const selectSeat = (seatId: number) => {
+  const selectSeat = (seatId: string) => {
     if (!room) return
     void navigate({ search: { room: room.id, seat: seatId } })
     setTokenOverride(null)
