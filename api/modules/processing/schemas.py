@@ -149,6 +149,7 @@ class RawTelemetry(BaseModel):
     uptime_ms: int = Field(ge=0)
     upper_cm: int | None = Field(ge=0, le=1000)
     lower_mm: int | None = Field(gt=0, lt=8000)
+    present: bool | None = None
     back_adc: int = Field(ge=0, le=4095)
     desk_adc: int = Field(ge=0, le=4095)
 

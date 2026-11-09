@@ -11,6 +11,7 @@ from modules.processing.schemas import (
 )
 from modules.processing.sensor_features import SensorWindow, baseline_result
 from modules.processing.sensor_models import load_artifact, predict_scores
+from modules.processing.services.sensor_classification import classify_presence
 
 
 class SensorClassificationService:
@@ -55,18 +56,14 @@ class SensorClassificationService:
                 self._last_prediction = -1.0
             self._latest = sample
             self._window.add(sample)
-            if (
-                telemetry.lower_mm is None
-                or telemetry.lower_mm >= self._settings.sensor_presence_mm
-            ):
+            present = classify_presence(telemetry, self._settings.sensor_presence_mm)
+            if present is not True:
                 self._evidence = SensorMeasurements(
                     drowsy=None,
                     captured_at_ms=sample.received_at * 1000,
-                    present=False if telemetry.lower_mm is not None else None,
+                    present=False,
                     model_version=self._active_model,
-                    unavailable_reason="unoccupied"
-                    if telemetry.lower_mm is not None
-                    else "invalid_lower_distance",
+                    unavailable_reason="unoccupied",
                 )
                 return True
             if (

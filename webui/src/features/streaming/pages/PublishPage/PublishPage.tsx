@@ -107,6 +107,7 @@ export const PublishPage = () => {
           ) : null}
           <DetectionStatus
             detection={streaming.detection}
+            detectionDebug={streaming.metrics?.detection_state ?? null}
             mqttAlertSentRecently={streaming.mqttAlertSentRecently}
           />
         </div>

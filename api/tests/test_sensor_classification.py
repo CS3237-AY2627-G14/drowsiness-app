@@ -58,7 +58,7 @@ def test_original_truth_table(index: int) -> None:
 @pytest.mark.parametrize(
     ("upper", "lower", "back", "desk", "present", "drowsy"),
     [
-        (7, -1, 1000, 1500, None, None),
+        (7, -1, 1000, 1500, False, None),
         (7, 300, 1000, 1500, False, None),
         (7, 299, 1000, 1500, True, True),
         (-1, 150, 1000, 1500, True, None),
@@ -96,6 +96,24 @@ def test_sensor_boundaries(
     )
     result = classify_raw_telemetry(reading, 0.0)
     assert (result.present, result.drowsy) == (present, drowsy)
+
+
+def test_api_derives_presence_from_distance_not_legacy_presence_field() -> None:
+    reading = RawTelemetry(
+        schema_version=1,
+        boot_id="test",
+        sequence=1,
+        uptime_ms=200,
+        upper_cm=7,
+        lower_mm=300,
+        present=True,
+        back_adc=1000,
+        desk_adc=1500,
+    )
+
+    result = classify_raw_telemetry(reading, 0.0)
+
+    assert result.present is False
 
 
 def test_missing_gate_logs_why_truth_table_has_no_result(

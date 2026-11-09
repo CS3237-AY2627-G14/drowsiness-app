@@ -271,6 +271,7 @@ class FrameProcessingService:
         )
         if expired != record.detection_state:
             previous_drowsy = self._drowsy_seat_ids()
+            previous_detection = record.detection_state.detection
             record = record.model_copy(update={"detection_state": expired})
             self._processing_registry.save(connection_id, record)
             if record.seat_id is not None and record.seat_id in self._seat_rows:
@@ -278,7 +279,12 @@ class FrameProcessingService:
                 self._seat_rows[record.seat_id] = row.model_copy(
                     update={"detection_state": expired}
                 )
-                if expired.detection is None:
+                detection_alert_changed = (
+                    previous_detection is not None
+                    and expired.detection is not None
+                    and previous_detection.alert != expired.detection.alert
+                )
+                if expired.detection is None or detection_alert_changed:
                     self._publish_seat(
                         record.seat_id, previous_drowsy, sensor_driven=False
                     )
@@ -320,7 +326,16 @@ class FrameProcessingService:
         phase: Literal[
             "stable", "entering_drowsy", "recovering", "unknown_grace", "unavailable"
         ]
-        if detection is None:
+        unknown_seconds = (
+            max(0.0, (now_ms - state.unknown_since_ms) / 1000)
+            if state.unknown_since_ms is not None
+            else 0.0
+        )
+        classification_expired = (
+            state.unknown_since_ms is not None
+            and unknown_seconds >= self._settings.detection_unknown_timeout_seconds
+        )
+        if detection is None or classification_expired:
             confirmed, phase = "unavailable", "unavailable"
         else:
             confirmed = "drowsy" if detection.alert else "monitoring"
@@ -335,10 +350,20 @@ class FrameProcessingService:
         reason = None
         if camera_age is not None and camera_age > 1:
             reason = "camera_stale"
+        elif detection is not None and detection.sensor_unavailable_reason:
+            reason = detection.sensor_unavailable_reason
+        elif detection is not None and detection.present is False:
+            reason = "unoccupied"
+        elif detection is not None and detection.sensor_drowsy is None:
+            reason = "sensor_stale_or_missing"
         elif row is not None and row.sensor_measurements is not None:
             reason = row.sensor_measurements.unavailable_reason
         elif detection is None:
-            reason = "waiting_for_camera"
+            reason = (
+                "waiting_for_camera"
+                if camera_age is None
+                else "sensor_stale_or_missing"
+            )
         current = (
             state.samples[-1].drowsy
             if state.samples
@@ -356,9 +381,7 @@ class FrameProcessingService:
             awake_seconds=max(0.0, (now_ms - state.awake_since_ms) / 1000)
             if state.awake_since_ms is not None
             else 0.0,
-            unknown_seconds=max(0.0, (now_ms - state.unknown_since_ms) / 1000)
-            if state.unknown_since_ms is not None
-            else 0.0,
+            unknown_seconds=unknown_seconds,
             entry_required_seconds=self._settings.drowsy_streak_seconds,
             recovery_required_seconds=self._settings.awake_streak_seconds,
             unknown_timeout_seconds=self._settings.detection_unknown_timeout_seconds,
@@ -601,7 +624,12 @@ class FrameProcessingService:
         row = self._seat_rows[seat_id]
         detection = row.detection_state.detection
         drowsy = detection is not None and detection.alert
-        return StudentSeatStatus(seat_id=seat_id, drowsy=drowsy)
+        present = (
+            row.sensor_measurements.present
+            if row.sensor_measurements is not None
+            else None
+        )
+        return StudentSeatStatus(seat_id=seat_id, drowsy=drowsy, present=present)
 
     def _take_fresh_batch(self) -> tuple[QueuedFrame, ...]:
         now = self._timer.now()

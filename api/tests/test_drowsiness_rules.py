@@ -349,7 +349,7 @@ def test_recovery_requires_continuous_awake_evidence() -> None:
     assert state.detection is not None and not state.detection.alert
 
 
-def test_unknown_timeout_does_not_restart_with_more_unknown_frames() -> None:
+def test_unknown_timeout_preserves_camera_snapshot_and_does_not_restart() -> None:
     state = DetectionState()
     for timestamp in range(0, 5001, 1000):
         state = observe(state, float(timestamp), probability=0.9)
@@ -358,9 +358,11 @@ def test_unknown_timeout_does_not_restart_with_more_unknown_frames() -> None:
         assert state.detection is not None and state.detection.alert
         assert state.unknown_since_ms == 5100.0
     state = observe(state, 10100.0, sensor_drowsy=None)
-    assert state.detection is None
+    assert state.detection is not None and not state.detection.alert
+    assert state.detection.face_detected
     state = observe(state, 10150.0, sensor_drowsy=None)
-    assert state.detection is None
+    assert state.detection is not None and not state.detection.alert
+    assert state.detection.face_detected
     state = observe(state, 10200.0, probability=0.9)
     assert state.detection is not None and not state.detection.alert
     assert state.drowsy_since_ms == 10200.0

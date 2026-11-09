@@ -88,10 +88,16 @@ ROW_RESULT: tuple[bool | None, ...] = (
 )
 
 
+def classify_presence(
+    telemetry: RawTelemetry, presence_mm: int = TOF_DETECT_MM
+) -> bool:
+    return telemetry.lower_mm is not None and telemetry.lower_mm < presence_mm
+
+
 def classify_raw_telemetry(
     telemetry: RawTelemetry, captured_at_ms: float, presence_mm: int = 300
 ) -> SensorMeasurements:
-    present = None if telemetry.lower_mm is None else telemetry.lower_mm < presence_mm
+    present = classify_presence(telemetry, presence_mm)
     drowsy = None
     table_index: int | None = None
     upper: int | None = None
@@ -99,19 +105,19 @@ def classify_raw_telemetry(
     desk: int | None = None
     # if present and telemetry.upper_cm is not None:
     if present:
-        if  telemetry.upper_cm is None:
+        if telemetry.upper_cm is None:
             upper = 0
         else:
-            upper = classify_three_levels(telemetry.upper_cm, US_LOW_MAX_CM, US_MED_MAX_CM)
+            upper = classify_three_levels(
+                telemetry.upper_cm, US_LOW_MAX_CM, US_MED_MAX_CM
+            )
         back = classify_three_levels(telemetry.back_adc, BACK_LOW_MAX, BACK_MED_MAX)
         desk = 1 if telemetry.desk_adc < 1000 else 2 if telemetry.desk_adc > 2000 else 0
         table_index = 2 + desk * 9 + back * 3 + upper
         drowsy = ROW_RESULT[table_index]
     if drowsy is None:
         reason = (
-            "lower distance missing"
-            if telemetry.lower_mm is None
-            else "seat unoccupied"
+            "seat unoccupied"
             if not present
             else "upper distance missing"
             if telemetry.upper_cm is None

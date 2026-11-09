@@ -84,9 +84,12 @@ def expire_detection(
     if unknown_since is None:
         return state
     if now_ms - unknown_since >= settings.detection_unknown_timeout_seconds * 1000:
+        detection = state.detection
+        if detection is not None and detection.alert:
+            detection = detection.model_copy(update={"alert": False})
         return state.model_copy(
             update={
-                "detection": None,
+                "detection": detection,
                 "drowsy_since_ms": None,
                 "awake_since_ms": None,
                 "unknown_since_ms": unknown_since,
