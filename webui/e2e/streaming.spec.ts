@@ -244,7 +244,7 @@ test('keeps a restarted preview when the cancelled camera request finishes late'
         {
           id: 101,
           name: 'Room 101',
-          seats: [{ id: 1, room_id: 101, seat_number: 1 }],
+          seats: [{ id: '1', room_id: 101, seat_number: 1 }],
         },
       ],
     }),
@@ -310,7 +310,7 @@ test('allows choosing a populated classroom when the first one is empty', async 
         {
           id: 101,
           name: 'Room 101',
-          seats: [{ id: 1, room_id: 101, seat_number: 1 }],
+          seats: [{ id: '1', room_id: 101, seat_number: 1 }],
         },
       ],
     }),
@@ -391,14 +391,14 @@ test('keeps room and seat in the URL across refresh and back navigation', async 
         {
           id: 101,
           name: 'Room 101',
-          seats: [{ id: 1, room_id: 101, seat_number: 1 }],
+          seats: [{ id: '1', room_id: 101, seat_number: 1 }],
         },
         {
           id: 102,
           name: 'Room 102',
           seats: [
-            { id: 11, room_id: 102, seat_number: 1 },
-            { id: 12, room_id: 102, seat_number: 2 },
+            { id: '11', room_id: 102, seat_number: 1 },
+            { id: '12', room_id: 102, seat_number: 2 },
           ],
         },
       ],
@@ -641,7 +641,7 @@ test('selects a camera without overflowing controls and refreshes devices withou
         {
           id: 101,
           name: 'Room 101',
-          seats: [{ id: 1, room_id: 101, seat_number: 1 }],
+          seats: [{ id: '1', room_id: 101, seat_number: 1 }],
         },
       ],
     }),
@@ -723,3 +723,31 @@ test('selects a camera without overflowing controls and refreshes devices withou
     .click()
   await expect(selector.locator('option')).toHaveCount(1)
 })
+
+for (const seatId of ['A1', '001', '1e3', 'true']) {
+  test(`preserves string seat ${seatId} on navigation and refresh`, async ({
+    page,
+  }) => {
+    await page.route('**/api/classrooms', (route) =>
+      route.fulfill({
+        json: [
+          {
+            id: 101,
+            name: 'Room',
+            seats: [
+              { id: '1', room_id: 101, seat_number: 1 },
+              { id: seatId, room_id: 101, seat_number: 2 },
+            ],
+          },
+        ],
+      }),
+    )
+    await page.goto(`/streaming?room=101&seat=${seatId}`)
+    await expect(page.getByLabel('Seat', { exact: true })).toHaveValue(seatId)
+    await page.reload()
+    await expect(page.getByLabel('Seat', { exact: true })).toHaveValue(seatId)
+    await page.getByLabel('Seat', { exact: true }).selectOption('1')
+    await page.getByLabel('Seat', { exact: true }).selectOption(seatId)
+    await expect(page).toHaveURL(new RegExp(`seat=${seatId}$`))
+  })
+}

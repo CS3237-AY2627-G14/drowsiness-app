@@ -194,14 +194,14 @@ def test_recording_deduplication_labels_persistence_and_recovery(
         initialize_database(tmp_path)
         await service.start()
         recording = await service.start_recording(RecordingRequest(participant="a"))
-        await service._processing_facade.submit_raw_telemetry(raw())
-        await service._processing_facade.submit_raw_telemetry(raw())
+        await service._processing_facade.submit_raw_telemetry(raw(), "1")
+        await service._processing_facade.submit_raw_telemetry(raw(), "1")
         clock.current_time += timedelta(seconds=0.2)
-        await service._processing_facade.submit_raw_telemetry(raw(2))
+        await service._processing_facade.submit_raw_telemetry(raw(2), "1")
         clock.current_time += timedelta(seconds=0.2)
-        await service._processing_facade.submit_raw_telemetry(raw(1, boot="new"))
+        await service._processing_facade.submit_raw_telemetry(raw(1, boot="new"), "1")
         await service._processing_facade.submit_raw_telemetry(
-            raw(99)
+            raw(99), "1"
         )  # retired boot cannot return
         detail = await service.get_recording(recording.id)
         assert len(detail.samples) == 3
@@ -245,7 +245,7 @@ def test_background_training_activation_and_restart(tmp_path: Path) -> None:
             and service.get_live_telemetry().active_model is None
         )
         await service._processing_facade.submit_raw_telemetry(
-            raw()
+            raw(), "1"
         )  # ingestion remains available during training
         await service.stop()
         assert (await service.list_training_jobs())[0].status == "complete"
@@ -271,15 +271,15 @@ def test_legacy_unknown_invalidates_and_frames_get_sensor_evidence_evidence() ->
         )
         connection_id = uuid4()
         await frames.open_connection(connection_id)
-        await frames.associate_seat(connection_id, 1)
+        await frames.associate_seat(connection_id, "1")
         await frames.submit_sensor_measurements(
-            1, SensorMeasurements(drowsy=True, present=True, captured_at_ms=1.0)
+            "1", SensorMeasurements(drowsy=True, present=True, captured_at_ms=1.0)
         )
         await frames.submit_frame(
             connection_id, FrameInput(frame_id=1, captured_at_ms=1.0, jpeg=b"jpeg")
         )
         await frames.submit_sensor_measurements(
-            1,
+            "1",
             SensorMeasurements(
                 drowsy=None,
                 present=True,
@@ -291,20 +291,20 @@ def test_legacy_unknown_invalidates_and_frames_get_sensor_evidence_evidence() ->
             connection_id, FrameInput(frame_id=2, captured_at_ms=2.0, jpeg=b"jpeg")
         )
         batch = buffer.claim_batch(1)
-        assert frames._get_sensor_evidence(1).drowsy is None
-        assert frames._get_sensor_evidence(1).unavailable_reason == "legacy_no_result"
+        assert frames._get_sensor_evidence("1").drowsy is None
+        assert frames._get_sensor_evidence("1").unavailable_reason == "legacy_no_result"
         buffer.release_batch(batch)
         await frames.submit_sensor_measurements(
-            1, SensorMeasurements(drowsy=True, present=True, captured_at_ms=9e15)
+            "1", SensorMeasurements(drowsy=True, present=True, captured_at_ms=9e15)
         )
         await frames.submit_frame(
             connection_id, FrameInput(frame_id=3, captured_at_ms=3.0, jpeg=b"jpeg")
         )
         batch = buffer.claim_batch(1)
         await frames.submit_sensor_measurements(
-            1, SensorMeasurements(drowsy=False, present=True, captured_at_ms=9e15 + 1)
+            "1", SensorMeasurements(drowsy=False, present=True, captured_at_ms=9e15 + 1)
         )
-        assert frames._get_sensor_evidence(1).drowsy is False
+        assert frames._get_sensor_evidence("1").drowsy is False
         frames._apply_frame_measurements(
             FrameMeasurements(
                 connection_id=connection_id,
@@ -436,23 +436,21 @@ def test_active_model_owns_raw_input_and_missing_echo_is_not_low(
             sensor_classification_service=service._processing_facade._frame_processing_service._sensor_classification_service,
         )
         facade = ProcessingFacade(frames)
-        router = SensorMqttRouter(Settings(), facade, asyncio.Queue())
+        router = SensorMqttRouter(Settings(), facade, asyncio.Queue(), seat_ids=["1"])
         for sequence in range(16):
             await router._handle_message(
-                "drowsy/stud/1/data", raw(sequence).model_dump_json().encode()
+                "stud/1/data", raw(sequence).model_dump_json().encode()
             )
             clock.current_time += timedelta(seconds=0.2)
         assert service._processing_facade.get_sensor_evidence().drowsy is True
-        await router._handle_message(
-            "drowsy/student1/data", b'{"drowsy":0,"present":1}'
-        )
-        assert frames._get_sensor_evidence(1).drowsy is True
-        await router._handle_message("drowsy/student1/raw", b'{"schema_version":2}')
+        await router._handle_message("student1/data", b'{"drowsy":0,"present":1}')
+        assert frames._get_sensor_evidence("1").drowsy is True
+        await router._handle_message("student1/raw", b'{"schema_version":2}')
         live = service.get_live_telemetry()
         assert live.sample is not None
         assert live.sample.telemetry.sequence == 15
         clock.current_time += timedelta(seconds=6)
-        assert frames._get_sensor_evidence(1).drowsy is None
+        assert frames._get_sensor_evidence("1").drowsy is None
         with pytest.raises(ValueError, match="mismatch"):
             load_artifact(tmp_path, model_id, 100)
 
@@ -484,8 +482,8 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
         facade = ProcessingFacade(frames)
         connection_id = uuid4()
         await frames.open_connection(connection_id)
-        await frames.associate_seat(connection_id, 1)
-        await facade.submit_raw_telemetry(raw())
+        await frames.associate_seat(connection_id, "1")
+        await facade.submit_raw_telemetry(raw(), "1")
         for index in range(10):
             frames._apply_frame_measurements(
                 FrameMeasurements(
@@ -500,7 +498,7 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
         assert status.detection is not None and status.detection.alert
         clock.current_time += timedelta(seconds=0.2)
         absent = raw(2).model_copy(update={"lower_mm": 400})
-        await facade.submit_raw_telemetry(absent)
+        await facade.submit_raw_telemetry(absent, "1")
         status = await frames.get_status(connection_id)
         assert status.processed_frames == 10
         assert status.detection is not None
@@ -508,13 +506,13 @@ def test_raw_updates_reclassify_combined_result_and_reset_publishes_clear(
         assert status.detection.minute.valid_samples == 9
         assert not status.detection.alert
         # Duplicate/retired evidence cannot restore occupancy.
-        await facade.submit_raw_telemetry(raw())
+        await facade.submit_raw_telemetry(raw(), "1")
         assert (await frames.get_status(connection_id)).detection == status.detection
         await frames.reset_sensor_history()
         assert (await frames.get_status(connection_id)).detection is None
         assert publisher.get_snapshot()[0].drowsy_seats == ()
         record = registry.get(connection_id)
-        assert record is not None and record.seat_id == 1
+        assert record is not None and record.seat_id == "1"
 
     asyncio.run(run())
 
@@ -588,8 +586,8 @@ def test_disconnect_stops_recording_sensor_revisions_to_the_closed_stream(
         frame_processing_service = processing_facade._frame_processing_service
         connection_id = uuid4()
         await frame_processing_service.open_connection(connection_id)
-        await frame_processing_service.associate_seat(connection_id, 1)
-        await processing_facade.submit_raw_telemetry(raw())
+        await frame_processing_service.associate_seat(connection_id, "1")
+        await processing_facade.submit_raw_telemetry(raw(), "1")
         evidence = processing_facade.get_sensor_evidence()
         service._recording_service.observe_camera(
             recording.id,
@@ -601,7 +599,7 @@ def test_disconnect_stops_recording_sensor_revisions_to_the_closed_stream(
         )
         await frame_processing_service.close_connection(connection_id)
         clock.current_time += timedelta(seconds=0.2)
-        await processing_facade.submit_raw_telemetry(raw(2))
+        await processing_facade.submit_raw_telemetry(raw(2), "1")
         await service.stop_recording(recording.id)
         detail = await service.get_recording(recording.id)
         assert len(detail.observations) == 1

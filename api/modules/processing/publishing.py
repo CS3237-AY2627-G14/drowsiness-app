@@ -13,21 +13,21 @@ from modules.processing.mqtt_topics import (
 class StudentSeatStatus(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
-    seat_id: int = Field(exclude=True)
+    seat_id: str = Field(exclude=True)
     drowsy: bool
 
 
 class LecturerResult(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
-    drowsy_seats: tuple[int, ...]
+    drowsy_seats: tuple[str, ...]
 
 
 class SeatStatusUpdate(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
     student: StudentSeatStatus | None = None
-    drowsy_seats: tuple[int, ...] | None = None
+    drowsy_seats: tuple[str, ...] | None = None
 
 
 class MqttPublication(BaseModel):
@@ -41,17 +41,17 @@ class MqttPublication(BaseModel):
 class SeatStatusPublisher(Protocol):
     def publish(self, update: SeatStatusUpdate) -> None: ...
 
-    def get_last_alert_published_at(self, seat_id: int) -> float | None: ...
+    def get_last_alert_published_at(self, seat_id: str) -> float | None: ...
 
 
 class QueueSeatStatusPublisher:
     def __init__(self, updates: asyncio.Queue[SeatStatusUpdate]) -> None:
         self._updates = updates
-        self._last_alert_published_at: dict[int, float] = {}
-        self._students: dict[int, StudentSeatStatus] = {}
-        self._drowsy_seats: tuple[int, ...] = ()
+        self._last_alert_published_at: dict[str, float] = {}
+        self._students: dict[str, StudentSeatStatus] = {}
+        self._drowsy_seats: tuple[str, ...] = ()
 
-    def get_last_alert_published_at(self, seat_id: int) -> float | None:
+    def get_last_alert_published_at(self, seat_id: str) -> float | None:
         return self._last_alert_published_at.get(seat_id)
 
     def record_publication(self, student: StudentSeatStatus) -> None:

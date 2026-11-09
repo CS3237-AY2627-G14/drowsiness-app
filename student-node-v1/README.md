@@ -3,12 +3,12 @@
 Open `StudentNode/StudentNode.ino` using the ESP32 Arduino board package and
 DOIT ESP32 DEVKIT V1 board. Install ESP32MQTTClient, ArduinoJson v6, and Adafruit
 VL53L0X. Copy `StudentNode/config.example.h` to `StudentNode/config.h`, configure
-Wi-Fi, MQTT URI and the numeric seat ID string, then compile and upload.
+Wi-Fi, MQTT URI and the alphanumeric seat ID string, then compile and upload.
 The private configuration is ignored by Git. Wiring is documented in the sketch.
 
 The node publishes versioned raw telemetry every 200 ms on
-`drowsy/stud/<seat_id>/data`; failed distances are null. The API owns detection.
-It receives `{"drowsy":true}` on `drowsy/stud/<seat_id>/result` and alerts for
+`stud/<seat_id>/data`; failed distances are null. The API owns detection.
+It receives `{"drowsy":true}` on `stud/<seat_id>/result` and alerts for
 five seconds on false-to-true transitions. Repeated true does not extend it;
 false re-arms it. Reflash together with the API update.
 

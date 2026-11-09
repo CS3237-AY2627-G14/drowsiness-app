@@ -21,7 +21,7 @@ class SeatModel(Base):
         CheckConstraint("seat_number > 0", name="ck_seats_positive_number"),
     )
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
     room_id: Mapped[int] = mapped_column(ForeignKey("rooms.id"))
     seat_number: Mapped[int]
     room: Mapped[RoomModel] = relationship(back_populates="seats")

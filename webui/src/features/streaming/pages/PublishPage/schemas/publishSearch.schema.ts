@@ -8,5 +8,9 @@ const optionalId = z.coerce
   .catch(undefined)
 export const publishSearchSchema = z.object({
   room: optionalId,
-  seat: optionalId,
+  seat: z
+    .string()
+    .regex(/^[A-Za-z0-9]+$/)
+    .optional()
+    .catch(undefined),
 })

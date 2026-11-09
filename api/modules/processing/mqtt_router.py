@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from collections.abc import Collection
 
 import aiomqtt
 from pydantic import ValidationError
@@ -7,8 +8,8 @@ from pydantic import ValidationError
 from core.config import Settings
 from modules.processing.facade import ProcessingFacade, RawTelemetry
 from modules.processing.mqtt_topics import (
-    STUDENT_DATA_SUBSCRIPTIONS,
-    parse_seat_id,
+    STUDENT_DATA_SUBSCRIPTION,
+    build_student_data_topic,
 )
 from modules.processing.publishing import (
     QueueSeatStatusPublisher,
@@ -26,7 +27,12 @@ class SensorMqttRouter:
         processing_facade: ProcessingFacade,
         status_updates: asyncio.Queue[SeatStatusUpdate],
         status_publisher: QueueSeatStatusPublisher | None = None,
+        *,
+        seat_ids: Collection[str],
     ) -> None:
+        self._seat_by_topic = {
+            build_student_data_topic(seat_id): seat_id for seat_id in seat_ids
+        }
         self._settings = settings
         self._processing_facade = processing_facade
         self._status_updates = status_updates
@@ -62,8 +68,7 @@ class SensorMqttRouter:
                     hostname=self._settings.mqtt_host,
                     port=self._settings.mqtt_port,
                 ) as mqtt_client:
-                    for subscription in STUDENT_DATA_SUBSCRIPTIONS:
-                        await mqtt_client.subscribe(subscription)
+                    await mqtt_client.subscribe(STUDENT_DATA_SUBSCRIPTION)
                     async with asyncio.TaskGroup() as task_group:
                         task_group.create_task(self._receive_messages(mqtt_client))
                         task_group.create_task(self._publish_updates(mqtt_client))
@@ -119,20 +124,15 @@ class SensorMqttRouter:
             self._status_publisher.record_publication(update.student)
 
     async def _handle_message(self, topic: str, payload: bytes) -> None:
-        seat_id = parse_seat_id(topic)
+        seat_id = self._seat_by_topic.get(topic)
         if seat_id is None:
             return
-        if seat_id > self._settings.demo_seat_count:
-            logger.warning(
-                "Ignoring MQTT message for unknown student seat_id=%d", seat_id
-            )
-            return
         if len(payload) > 1024:
-            logger.warning("Ignoring oversized MQTT sensor message seat_id=%d", seat_id)
+            logger.warning("Ignoring oversized MQTT sensor message seat_id=%s", seat_id)
             return
         try:
             telemetry = RawTelemetry.model_validate_json(payload)
         except ValidationError:
-            logger.warning("Ignoring invalid raw telemetry seat_id=%d", seat_id)
+            logger.warning("Ignoring invalid raw telemetry seat_id=%s", seat_id)
             return
         await self._processing_facade.submit_raw_telemetry(telemetry, seat_id)

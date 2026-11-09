@@ -55,9 +55,7 @@ class ProcessingFacade:
     def __init__(self, frame_processing_service: FrameProcessingService) -> None:
         self._frame_processing_service = frame_processing_service
 
-    async def submit_raw_telemetry(
-        self, telemetry: RawTelemetry, seat_id: int = 1
-    ) -> None:
+    async def submit_raw_telemetry(self, telemetry: RawTelemetry, seat_id: str) -> None:
         await self._frame_processing_service.submit_raw_telemetry(telemetry, seat_id)
 
     def get_live_telemetry(self) -> LiveTelemetry:
@@ -75,11 +73,11 @@ class ProcessingFacade:
     async def open_connection(self, connection_id: UUID) -> None:
         await self._frame_processing_service.open_connection(connection_id)
 
-    async def associate_seat(self, connection_id: UUID, seat_id: int) -> None:
+    async def associate_seat(self, connection_id: UUID, seat_id: str) -> None:
         await self._frame_processing_service.associate_seat(connection_id, seat_id)
 
     async def submit_sensor_measurements(
-        self, seat_id: int, measurements: SensorMeasurements
+        self, seat_id: str, measurements: SensorMeasurements
     ) -> None:
         await self._frame_processing_service.submit_sensor_measurements(
             seat_id, measurements

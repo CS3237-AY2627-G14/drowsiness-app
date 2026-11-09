@@ -6,7 +6,7 @@ from modules.classrooms.schemas import SeatInfo
 class SeatRepository(Protocol):
     async def list_seats(self, room_id: int) -> list[SeatInfo]: ...
 
-    async def get_seat(self, seat_id: int) -> SeatInfo | None: ...
+    async def get_seat(self, seat_id: str) -> SeatInfo | None: ...
 
 
 class InMemorySeatRepository:
@@ -16,5 +16,5 @@ class InMemorySeatRepository:
     async def list_seats(self, room_id: int) -> list[SeatInfo]:
         return [seat for seat in self._seats.values() if seat.room_id == room_id]
 
-    async def get_seat(self, seat_id: int) -> SeatInfo | None:
+    async def get_seat(self, seat_id: str) -> SeatInfo | None:
         return self._seats.get(seat_id)

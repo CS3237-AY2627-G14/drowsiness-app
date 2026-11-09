@@ -29,6 +29,15 @@ const streamingRoute = createRoute({
 })
 
 export const router = createRouter({
+  parseSearch: (search) => Object.fromEntries(new URLSearchParams(search)),
+  stringifySearch: (search) => {
+    const parameters = new URLSearchParams()
+    for (const [key, value] of Object.entries(search)) {
+      if (value !== undefined) parameters.set(key, String(value))
+    }
+    const query = parameters.toString()
+    return query ? `?${query}` : ''
+  },
   routeTree: rootRoute.addChildren([
     indexRoute,
     streamingRoute,

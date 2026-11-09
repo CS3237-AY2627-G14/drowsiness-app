@@ -16,7 +16,7 @@ class PublisherRepository(Protocol):
 
 class InMemoryPublisherRepository:
     def __init__(self) -> None:
-        self._publishers: dict[int, PublisherSession] = {}
+        self._publishers: dict[str, PublisherSession] = {}
 
     async def get_publisher(self, connection_id: UUID) -> PublisherSession | None:
         for publisher in self._publishers.values():

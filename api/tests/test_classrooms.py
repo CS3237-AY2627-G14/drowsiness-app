@@ -11,7 +11,7 @@ def test_classroom_topology_is_available_without_credentials(
             "id": 101,
             "name": "Room 101",
             "seats": [
-                {"id": number, "room_id": 101, "seat_number": number}
+                {"id": str(number), "room_id": 101, "seat_number": number}
                 for number in range(1, 11)
             ],
         }

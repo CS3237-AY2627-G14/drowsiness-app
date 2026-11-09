@@ -10,13 +10,13 @@ under `dataMux`, then updates the LCD and alarm outside the critical section.
 
 ## MQTT and display
 
-The API publishes retained snapshots on `drowsy/lect/result`:
+The API publishes retained snapshots on `lect/result`:
 
 ```json
-{"drowsy_seats":[1,3]}
+{"drowsy_seats":["1","3"]}
 ```
 
-IDs must be positive integers. The count comes from the array. The 16x2 LCD
+IDs must be nonempty strings containing ASCII letters and digits. The count comes from the array. The 16x2 LCD
 shows `Drowsy: <count>` and the comma-separated IDs. Lists longer than 16 characters
 scroll every 500 ms; shorter replacements overwrite the old line with padding.
 An empty list shows `Drowsy: 0` and `No IDs reported`.
@@ -48,8 +48,8 @@ With the ESP32 toolchain installed, compile from this project directory:
 arduino-cli compile --fqbn esp32:esp32:esp32doit-devkit-v1 LecturerNodeV1
 ```
 
-On hardware, send an empty retained baseline, then `[1]`, `[1,3]`, `[3,1]`,
-`[1]`, and `[]`. Verify that only additions sound an alarm. Reconnect with a
+On hardware, send an empty retained baseline, then `["1"]`, `["1","3"]`, `["3","1"]`,
+`["1"]`, and `[]`. Verify that only additions sound an alarm. Reconnect with a
 nonempty retained list and verify a silent display refresh. Check IDs `1` and
 `11`, long scrolling lists, shorter replacements, additions during an alarm,
 and malformed, invalid-ID and oversized messages. Invalid input must not change
@@ -58,3 +58,5 @@ the LCD or establish the reconnect baseline.
 Host checks cover the display and alarm logic with hardware stand-ins. They do
 not establish successful ESP32 compilation, MQTT parsing/delivery, or physical
 LCD, LED and buzzer behavior. Reflash together with the API update.
+
+Reflash this firmware before restarting an API that publishes string seat IDs.

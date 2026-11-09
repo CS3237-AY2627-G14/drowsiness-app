@@ -83,7 +83,7 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 ## MQTT
 
 Student nodes publish versioned telemetry every 200 ms to
-`drowsy/stud/<seat_id>/data` (QoS 0, non-retained):
+`stud/<seat_id>/data` (QoS 0, non-retained):
 
 ```json
 {"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
@@ -102,10 +102,10 @@ do not count. New sensor readings can revise the latest combined sample without
 adding observations. The rolling minute uses the latest picture per second and
 requires ten valid samples with at least half drowsy.
 
-Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
+Results publish at QoS 1 to `stud/<seat_id>/result` as `{"drowsy":true}`.
 Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
 publications occur at most once per second, except alert changes. The lecturer
-receives retained `{"drowsy_seats":[1,3]}` on `drowsy/lect/result`; empty lists clear
+receives retained `{"drowsy_seats":["1","3"]}` on `lect/result`; empty lists clear
 its display. The old hardcoded A1 notification is removed. The UI publication
 indicator is per-seat and confirms broker publication, not hardware execution.
 

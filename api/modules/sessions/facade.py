@@ -11,7 +11,7 @@ class SessionsFacade:
     def __init__(self, sessions_service: SessionsService) -> None:
         self._sessions_service = sessions_service
 
-    async def open_publisher(self, *, token: str, seat_id: int) -> PublisherSession:
+    async def open_publisher(self, *, token: str, seat_id: str) -> PublisherSession:
         return await self._sessions_service.open_publisher(token=token, seat_id=seat_id)
 
     async def close_publisher(self, connection_id: UUID) -> None:

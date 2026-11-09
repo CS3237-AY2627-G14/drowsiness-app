@@ -22,7 +22,7 @@ def connection() -> Iterator[Connection]:
         Base.metadata.create_all(database)
         room_insert = insert(RoomModel).values(id=101, name="Room 101")
         database.execute(room_insert)
-        seat_insert = insert(SeatModel).values(id=1, room_id=101, seat_number=1)
+        seat_insert = insert(SeatModel).values(id="1", room_id=101, seat_number=1)
         database.execute(seat_insert)
         database.commit()
         yield database
@@ -33,7 +33,7 @@ def add_session(
     connection: Connection,
     *,
     token: str,
-    seat_id: int = 1,
+    seat_id: str = "1",
     ended: bool = False,
     expired: bool = False,
 ) -> None:
@@ -61,7 +61,7 @@ def test_mappings_and_postgresql_schema_compile() -> None:
         for index in table.indexes:
             assert str(CreateIndex(index).compile(dialect=dialect))
     room = RoomModel(id=101, name="Room 101")
-    seat = SeatModel(id=1, seat_number=1, room=room)
+    seat = SeatModel(id="1", seat_number=1, room=room)
     assert room.seats == [seat]
 
 
@@ -79,13 +79,13 @@ def test_invalid_or_duplicate_seat_is_rejected(
 def test_same_seat_number_can_exist_in_another_room(connection: Connection) -> None:
     room_insert = insert(RoomModel).values(id=102, name="Room 102")
     connection.execute(room_insert)
-    seat_insert = insert(SeatModel).values(id=2, room_id=102, seat_number=1)
+    seat_insert = insert(SeatModel).values(id="2", room_id=102, seat_number=1)
     connection.execute(seat_insert)
 
 
 def test_session_requires_existing_seat(connection: Connection) -> None:
     with pytest.raises(IntegrityError):
-        add_session(connection, token="missing-seat", seat_id=999)
+        add_session(connection, token="missing-seat", seat_id="999")
 
 
 def test_only_one_open_session_is_allowed(connection: Connection) -> None:

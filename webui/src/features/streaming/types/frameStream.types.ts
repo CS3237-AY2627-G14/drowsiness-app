@@ -1,7 +1,7 @@
 import type { CapturedFrame } from './camera.types'
 import type { StreamStatus, StreamStatusSnapshot } from './protocol.types'
 
-export type PublishTarget = { seatId: number; token: string }
+export type PublishTarget = { seatId: string; token: string }
 
 export type FrameStreamConnection = {
   canSendFrame: () => boolean
@@ -9,7 +9,7 @@ export type FrameStreamConnection = {
 }
 
 export type ConnectFrameStreamOptions = {
-  seatId: number
+  seatId: string
   token: string
   signal: AbortSignal
   onStatus: (status: StreamStatus) => void

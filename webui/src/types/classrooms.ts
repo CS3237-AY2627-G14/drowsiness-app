@@ -1,5 +1,5 @@
 export type Seat = {
-  id: number
+  id: string
   room_id: number
   seat_number: number
 }

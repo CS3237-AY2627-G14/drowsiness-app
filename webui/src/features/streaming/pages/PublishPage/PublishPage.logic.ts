@@ -8,7 +8,7 @@ import type {
 export const resolvePublishSelection = (
   classrooms: Classroom[],
   roomId: number | undefined,
-  seatId: number | undefined,
+  seatId: string | undefined,
 ): PublishSelection => {
   const room =
     classrooms.find((candidate) => candidate.id === roomId) ?? classrooms[0]

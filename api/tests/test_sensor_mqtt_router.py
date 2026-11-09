@@ -9,12 +9,7 @@ from core.config import Settings
 from modules.processing.facade import ProcessingFacade
 from modules.processing.inference.frame_buffer import FrameBuffer
 from modules.processing.mqtt_router import SensorMqttRouter
-from modules.processing.mqtt_topics import (
-    build_student_data_subscription,
-    build_student_data_topic,
-    build_student_result_topic,
-    parse_seat_id,
-)
+from modules.processing.mqtt_topics import build_student_data_topic
 from modules.processing.publishing import (
     SeatStatusUpdate,
     StudentSeatStatus,
@@ -32,7 +27,7 @@ class RecordingStatusPublisher:
     def __init__(self) -> None:
         self.updates: list[SeatStatusUpdate] = []
 
-    def get_last_alert_published_at(self, seat_id: int) -> float | None:
+    def get_last_alert_published_at(self, seat_id: str) -> float | None:
         return None
 
     def publish(self, update: SeatStatusUpdate) -> None:
@@ -52,14 +47,17 @@ def test_sensor_message_is_validated_mapped_to_seat_and_used_by_camera_rules() -
             timer=timer,
         )
         mqtt_router = SensorMqttRouter(
-            settings, ProcessingFacade(processing_service), asyncio.Queue()
+            settings,
+            ProcessingFacade(processing_service),
+            asyncio.Queue(),
+            seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             json.dumps(
                 {
                     "schema_version": 1,
@@ -106,14 +104,17 @@ def test_firmware_sensor_topic_maps_readings_to_camera_result() -> None:
             settings,
         )
         mqtt_router = SensorMqttRouter(
-            settings, ProcessingFacade(processing_service), asyncio.Queue()
+            settings,
+            ProcessingFacade(processing_service),
+            asyncio.Queue(),
+            seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             json.dumps(
                 {
                     "schema_version": 1,
@@ -159,14 +160,17 @@ def test_unoccupied_firmware_sensor_sample_is_not_counted() -> None:
             settings,
         )
         mqtt_router = SensorMqttRouter(
-            settings, ProcessingFacade(processing_service), asyncio.Queue()
+            settings,
+            ProcessingFacade(processing_service),
+            asyncio.Queue(),
+            seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             json.dumps(
                 {
                     "upper_cm": 7,
@@ -211,14 +215,17 @@ def test_sensor_message_without_timestamp_uses_presence_for_classification() -> 
             settings,
         )
         mqtt_router = SensorMqttRouter(
-            settings, ProcessingFacade(processing_service), asyncio.Queue()
+            settings,
+            ProcessingFacade(processing_service),
+            asyncio.Queue(),
+            seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             json.dumps(
                 {
                     "upper_cm": 7,
@@ -263,14 +270,17 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
             settings,
         )
         mqtt_router = SensorMqttRouter(
-            settings, ProcessingFacade(processing_service), asyncio.Queue()
+            settings,
+            ProcessingFacade(processing_service),
+            asyncio.Queue(),
+            seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/student2/data",
+            "student2/data",
             json.dumps(
                 {
                     "schema_version": 1,
@@ -285,10 +295,10 @@ def test_invalid_or_unmapped_mqtt_sensor_messages_are_ignored() -> None:
             ).encode(),
         )
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             b'{"drowsy": 2, "present": 1}',
         )
-        await mqtt_router._handle_message("drowsy/stud/1/data", b"not-json")
+        await mqtt_router._handle_message("stud/1/data", b"not-json")
         processing_service._apply_frame_measurements(
             FrameMeasurements(
                 connection_id=connection_id,
@@ -322,13 +332,16 @@ def test_expired_sensor_measurements_make_camera_drowsiness_unavailable() -> Non
             timer=timer,
         )
         mqtt_router = SensorMqttRouter(
-            settings, ProcessingFacade(processing_service), asyncio.Queue()
+            settings,
+            ProcessingFacade(processing_service),
+            asyncio.Queue(),
+            seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
         )
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             json.dumps(
                 {
                     "schema_version": 1,
@@ -379,7 +392,10 @@ def _runtime(
         status_publisher=publisher,
     )
     mqtt_router = SensorMqttRouter(
-        settings, ProcessingFacade(processing_service), asyncio.Queue()
+        settings,
+        ProcessingFacade(processing_service),
+        asyncio.Queue(),
+        seat_ids=[str(number) for number in range(1, settings.demo_seat_count + 1)],
     )
     return processing_service, mqtt_router, processing_registry
 
@@ -430,15 +446,15 @@ def test_sensor_reading_publishes_student_status_without_lecturer_notice() -> No
         processing_service, mqtt_router, _registry = _runtime(10, publisher)
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             _sensor_message(1234, 420),
         )
 
         assert publisher.updates == [
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
+            SeatStatusUpdate(student=StudentSeatStatus(seat_id="1", drowsy=False))
         ]
 
     asyncio.run(run())
@@ -454,10 +470,8 @@ def test_sensor_absence_reclassifies_latest_camera_sample(
         processing_service, mqtt_router, registry = _runtime(1, publisher, timer)
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
+        await processing_service.associate_seat(connection_id, "1")
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(100, 420))
         processing_service._apply_frame_measurements(
             _camera_frame(connection_id, 1, 1792390000000)
         )
@@ -465,7 +479,7 @@ def test_sensor_absence_reclassifies_latest_camera_sample(
         timer.current_time = 1.0
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             _sensor_message(fsr, 420, present=present),
         )
 
@@ -479,7 +493,7 @@ def test_sensor_absence_reclassifies_latest_camera_sample(
         )
         assert record.detection_state.detection.present is (True if present else None)
         assert publisher.updates == [
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
+            SeatStatusUpdate(student=StudentSeatStatus(seat_id="1", drowsy=False))
         ]
 
     asyncio.run(run())
@@ -492,25 +506,21 @@ def test_alert_publishes_student_status_and_drowsy_seat_ids() -> None:
         first = uuid4()
         second = uuid4()
         await processing_service.open_connection(first)
-        await processing_service.associate_seat(first, 1)
+        await processing_service.associate_seat(first, "1")
         await processing_service.open_connection(second)
-        await processing_service.associate_seat(second, 2)
+        await processing_service.associate_seat(second, "2")
 
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
-        await mqtt_router._handle_message(
-            "drowsy/stud/2/data", _sensor_message(100, 420)
-        )
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(100, 420))
+        await mqtt_router._handle_message("stud/2/data", _sensor_message(100, 420))
         _raise_alert(processing_service, first)
         lecturer_updates = [
             update.drowsy_seats
             for update in publisher.updates
             if update.drowsy_seats is not None
         ]
-        assert lecturer_updates == [(1,)]
+        assert lecturer_updates == [("1",)]
         assert publisher.updates[-1].student == StudentSeatStatus(
-            seat_id=1, drowsy=True
+            seat_id="1", drowsy=True
         )
 
         _raise_alert(processing_service, second)
@@ -519,7 +529,7 @@ def test_alert_publishes_student_status_and_drowsy_seat_ids() -> None:
             for update in publisher.updates
             if update.drowsy_seats is not None
         ]
-        assert lecturer_updates == [(1,), (1, 2)]
+        assert lecturer_updates == [("1",), ("1", "2")]
 
         publisher.updates.clear()
         processing_service._apply_frame_measurements(_camera_frame(first, 31, 31000))
@@ -527,8 +537,8 @@ def test_alert_publishes_student_status_and_drowsy_seat_ids() -> None:
 
         await processing_service.close_connection(first)
         assert publisher.updates[-1] == SeatStatusUpdate(
-            student=StudentSeatStatus(seat_id=1, drowsy=False),
-            drowsy_seats=(2,),
+            student=StudentSeatStatus(seat_id="1", drowsy=False),
+            drowsy_seats=("2",),
         )
 
     asyncio.run(run())
@@ -541,14 +551,14 @@ def test_repeated_sensor_readings_inside_one_second_publish_once() -> None:
         processing_service, mqtt_router, registry = _runtime(1, publisher, timer)
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
 
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             _sensor_message(100, 420),
         )
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             _sensor_message(200, 430),
         )
 
@@ -569,20 +579,20 @@ def test_invalid_sensor_topics_and_payloads_do_not_publish() -> None:
         _processing_service, mqtt_router, _registry = _runtime(1, publisher)
 
         await mqtt_router._handle_message(
-            "drowsy/student/data",
+            "student/data",
             _sensor_message(1234, 420),
         )
         await mqtt_router._handle_message(
-            "drowsy/stud/0/data",
+            "stud/0/data",
             _sensor_message(1234, 420),
         )
         await mqtt_router._handle_message(
-            "drowsy/stud/2/data",
+            "stud/2/data",
             _sensor_message(1234, 420),
         )
-        await mqtt_router._handle_message("drowsy/stud/1/data", b"not-json")
+        await mqtt_router._handle_message("stud/1/data", b"not-json")
         await mqtt_router._handle_message(
-            "drowsy/stud/1/data",
+            "stud/1/data",
             b'{"fsr": 5000, "tof_mm": 420, "timestamp_ms": 1792390000000}',
         )
 
@@ -591,10 +601,10 @@ def test_invalid_sensor_topics_and_payloads_do_not_publish() -> None:
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("seat_id", [None, 1])
+@pytest.mark.parametrize("seat_id", [None, "1"])
 @pytest.mark.parametrize("error", [None, "invalid_frame"])
 def test_frame_results_increment_counters_only_for_successful_frames(
-    seat_id: int | None, error: str | None
+    seat_id: str | None, error: str | None
 ) -> None:
     async def run() -> None:
         processing_service, _mqtt_router, registry = _runtime(1)
@@ -630,11 +640,11 @@ def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
         processing_service, _mqtt_router, registry = _runtime(1, publisher, timer)
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
+        await processing_service.associate_seat(connection_id, "1")
         measurements = SensorMeasurements(
             drowsy=True, present=True, captured_at_ms=2000.0
         )
-        await processing_service.submit_sensor_measurements(1, measurements)
+        await processing_service.submit_sensor_measurements("1", measurements)
         processing_service._apply_frame_measurements(
             _camera_frame(connection_id, 1, 2000.0)
         )
@@ -645,7 +655,7 @@ def test_older_or_duplicate_sensor_readings_do_not_change_state_or_publish(
             update={"desk_adc": 0, "captured_at_ms": timestamp_ms}
         )
 
-        await processing_service.submit_sensor_measurements(1, outdated_measurements)
+        await processing_service.submit_sensor_measurements("1", outdated_measurements)
 
         assert registry.get(connection_id) == previous_record
         assert publisher.updates == []
@@ -662,20 +672,14 @@ def test_sensor_publish_intervals_are_per_seat_and_unaffected_by_camera_updates(
         processing_service, mqtt_router, _registry = _runtime(2, publisher, timer)
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
+        await processing_service.associate_seat(connection_id, "1")
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(100, 420))
         timer.current_time = 0.5
-        await mqtt_router._handle_message(
-            "drowsy/stud/2/data", _sensor_message(100, 420)
-        )
+        await mqtt_router._handle_message("stud/2/data", _sensor_message(100, 420))
         assert len(publisher.updates) == 2
 
         timer.current_time = 0.999
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(100, 420))
         assert len(publisher.updates) == 2
         processing_service._apply_frame_measurements(
             _camera_frame(connection_id, 1, 2000.0)
@@ -683,22 +687,16 @@ def test_sensor_publish_intervals_are_per_seat_and_unaffected_by_camera_updates(
         assert len(publisher.updates) == 3
 
         timer.current_time = 1.0
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(100, 420))
         assert len(publisher.updates) == 4
         timer.current_time = 1.499
-        await mqtt_router._handle_message(
-            "drowsy/stud/2/data", _sensor_message(100, 420)
-        )
+        await mqtt_router._handle_message("stud/2/data", _sensor_message(100, 420))
         assert len(publisher.updates) == 4
         timer.current_time = 1.5
-        await mqtt_router._handle_message(
-            "drowsy/stud/2/data", _sensor_message(100, 420)
-        )
+        await mqtt_router._handle_message("stud/2/data", _sensor_message(100, 420))
         assert publisher.updates == [
             SeatStatusUpdate(student=StudentSeatStatus(seat_id=seat_id, drowsy=False))
-            for seat_id in (1, 2, 1, 1, 2)
+            for seat_id in ("1", "2", "1", "1", "2")
         ]
 
     asyncio.run(run())
@@ -711,56 +709,73 @@ def test_sensor_alert_changes_bypass_throttling_and_reset_the_interval() -> None
         processing_service, mqtt_router, _registry = _runtime(1, publisher, timer)
         connection_id = uuid4()
         await processing_service.open_connection(connection_id)
-        await processing_service.associate_seat(connection_id, 1)
-        await mqtt_router._handle_message(
-            "drowsy/stud/1/data", _sensor_message(100, 420)
-        )
+        await processing_service.associate_seat(connection_id, "1")
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(100, 420))
         _raise_alert(processing_service, connection_id)
         publisher.updates.clear()
 
         timer.current_time = 0.25
-        await mqtt_router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(0, 420))
         cleared_alert = SeatStatusUpdate(
-            student=StudentSeatStatus(seat_id=1, drowsy=False), drowsy_seats=()
+            student=StudentSeatStatus(seat_id="1", drowsy=False), drowsy_seats=()
         )
         assert publisher.updates == [cleared_alert]
 
         timer.current_time = 1.0
-        await mqtt_router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(0, 420))
         assert publisher.updates == [cleared_alert]
         timer.current_time = 1.25
-        await mqtt_router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
+        await mqtt_router._handle_message("stud/1/data", _sensor_message(0, 420))
         assert publisher.updates == [
             cleared_alert,
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False)),
+            SeatStatusUpdate(student=StudentSeatStatus(seat_id="1", drowsy=False)),
         ]
 
     asyncio.run(run())
 
 
-def test_topic_templates_match_the_sensor_pattern() -> None:
-    topic = build_student_data_topic(12)
-    result_topic = build_student_result_topic(12)
-    subscription = build_student_data_subscription()
-    parsed_seat_id = parse_seat_id(topic)
-    assert topic == "drowsy/stud/12/data"
-    assert result_topic == "drowsy/stud/12/result"
-    assert subscription == "drowsy/stud/+/data"
-    assert parsed_seat_id == 12
-    assert parse_seat_id("drowsy/stud/1/data") == 1
-    assert parse_seat_id("drowsy/stud/1/data") == 1
-
-
 def test_status_update_uses_student_and_lecturer_topics() -> None:
     update = SeatStatusUpdate(
-        student=StudentSeatStatus(seat_id=1, drowsy=True),
-        drowsy_seats=(1, 2),
+        student=StudentSeatStatus(seat_id="1", drowsy=True),
+        drowsy_seats=("1", "2"),
     )
     publications = build_mqtt_publications(update)
 
     assert [(item.topic, item.retain) for item in publications] == [
-        ("drowsy/stud/1/result", False),
-        ("drowsy/lect/result", True),
+        ("stud/1/result", False),
+        ("lect/result", True),
     ]
     assert json.loads(publications[0].payload) == {"drowsy": True}
-    assert json.loads(publications[1].payload) == {"drowsy_seats": [1, 2]}
+    assert json.loads(publications[1].payload) == {"drowsy_seats": ["1", "2"]}
+
+
+@pytest.mark.parametrize("seat_id", ["A1", "001", "1e3", "true"])
+def test_registered_string_seats_receive_telemetry(seat_id: str) -> None:
+    async def run() -> None:
+        publisher = RecordingStatusPublisher()
+        service, _, registry = _runtime(1, publisher)
+        router = SensorMqttRouter(
+            Settings(), ProcessingFacade(service), asyncio.Queue(), seat_ids=[seat_id]
+        )
+        connection_id = uuid4()
+        await service.open_connection(connection_id)
+        await service.associate_seat(connection_id, seat_id)
+        await router._handle_message(
+            build_student_data_topic(seat_id), _sensor_message(0, 420)
+        )
+        assert publisher.updates[-1].student == StudentSeatStatus(
+            seat_id=seat_id, drowsy=False
+        )
+        previous_updates = list(publisher.updates)
+        for topic in (
+            "stud/unknown/data",
+            f"drowsy/stud/{seat_id}/data",
+            f"stud/{seat_id}/data/extra",
+            f"stud/{seat_id}/result",
+        ):
+            await router._handle_message(topic, _sensor_message(0, 420))
+        assert publisher.updates == previous_updates
+        record = registry.get(connection_id)
+        assert record is not None and record.seat_id == seat_id
+
+    asyncio.run(run())

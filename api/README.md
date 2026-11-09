@@ -92,7 +92,7 @@ use Linux paths in WSL. Do not commit private keys or credentials.
 ## MQTT
 
 Student nodes publish versioned telemetry every 200 ms to
-`drowsy/stud/<seat_id>/data` (QoS 0, non-retained):
+`stud/<seat_id>/data` (QoS 0, non-retained):
 
 ```json
 {"schema_version":1,"boot_id":"unique-per-boot","sequence":123,"uptime_ms":24600,"upper_cm":8,"lower_mm":180,"back_adc":2450,"desk_adc":1700}
@@ -111,10 +111,10 @@ do not count. New sensor readings can revise the latest combined sample without
 adding observations. The rolling minute uses the latest picture per second and
 requires ten valid samples with at least half drowsy.
 
-Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
+Results publish at QoS 1 to `stud/<seat_id>/result` as `{"drowsy":true}`.
 Student nodes alert for five seconds on false-to-true transitions. Sensor-driven
 publications occur at most once per second, except alert changes. The lecturer
-receives retained `{"drowsy_seats":[1,3]}` on `drowsy/lect/result`; empty lists clear
+receives retained `{"drowsy_seats":["1","3"]}` on `lect/result`; empty lists clear
 its display. The old hardcoded A1 notification is removed. The UI publication
 indicator is per-seat and confirms broker publication, not hardware execution.
 
@@ -157,3 +157,15 @@ camera. Load-test scripts live in `scripts/k6`; run their unit tests with
 `node --test scripts/k6/streaming.test.mjs` from `api/`.
 
 See [architecture](docs/architecture.md) for module responsibilities and data flow.
+
+Seat IDs are case-sensitive alphanumeric strings (for example, `"1"` or `"A1"`).
+`GET /api/classrooms` returns string seat IDs, and Socket.IO authentication requires
+a string `seat_id`. Room IDs and physical `seat_number` values remain numeric.
+The demo still provisions `"1"`, `"2"`, and so on; custom IDs must be registered
+in the classroom fixtures. MQTT accepts only registered seat topics. Lecturer
+results contain string IDs, such as `{"drowsy_seats":["1","3"]}`; update the
+lecturer firmware before restarting the updated API to refresh retained results.
+
+MQTT topics use `stud/<seat_id>/data`, `stud/<seat_id>/result`, and
+`lect/result` without an application prefix. Reflash both node types and restart
+the API together when upgrading from the former `drowsy/` topic namespace.

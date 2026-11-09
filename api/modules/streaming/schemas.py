@@ -9,7 +9,7 @@ from modules.sessions.facade import PublisherSession
 
 class AuthenticateMessage(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
-    seat_id: int = Field(gt=0)
+    seat_id: str = Field(pattern=r"^[A-Za-z0-9]+$")
     token: SecretStr = Field(min_length=1, max_length=512)
     diagnostics: bool = False
 

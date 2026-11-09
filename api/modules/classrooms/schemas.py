@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, PositiveInt
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
 
 class RoomInfo(BaseModel):
@@ -11,7 +11,7 @@ class RoomInfo(BaseModel):
 class SeatInfo(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
-    id: PositiveInt
+    id: str = Field(pattern=r"^[A-Za-z0-9]+$")
     room_id: PositiveInt
     seat_number: PositiveInt
 

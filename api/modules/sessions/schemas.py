@@ -5,7 +5,6 @@ from pydantic import (
     AwareDatetime,
     BaseModel,
     ConfigDict,
-    PositiveInt,
     StringConstraints,
 )
 
@@ -13,7 +12,7 @@ from pydantic import (
 class StreamSessionRecord(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     id: UUID
-    seat_id: PositiveInt
+    seat_id: str
     token_hash: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
     created_at: AwareDatetime
     expires_at: AwareDatetime
@@ -25,5 +24,5 @@ class PublisherSession(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     connection_id: UUID
     session_id: UUID
-    seat_id: PositiveInt
+    seat_id: str
     expires_at: AwareDatetime

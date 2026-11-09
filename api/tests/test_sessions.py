@@ -24,7 +24,7 @@ from tests.helpers import MutableClock, build_sessions
 def test_session_state_is_enforced(clock: MutableClock, state: str) -> None:
     session = StreamSessionRecord(
         id=uuid4(),
-        seat_id=99 if state == "unknown_seat" else 1,
+        seat_id="99" if state == "unknown_seat" else "1",
         token_hash=hash_token("test-token"),
         created_at=clock.now() - timedelta(hours=2),
         expires_at=clock.now()
@@ -38,28 +38,28 @@ def test_session_state_is_enforced(clock: MutableClock, state: str) -> None:
         asyncio.run(
             sessions_facade.open_publisher(
                 token="test-token",
-                seat_id=2 if state == "wrong_seat" else session.seat_id,
+                seat_id="2" if state == "wrong_seat" else session.seat_id,
             )
         )
 
 
 def test_authorization_uses_seat_id_not_physical_number(clock: MutableClock) -> None:
-    seat = SeatInfo(id=42, room_id=101, seat_number=7)
+    seat = SeatInfo(id="A1", room_id=101, seat_number=7)
     session = StreamSessionRecord(
         id=uuid4(),
-        seat_id=42,
+        seat_id="A1",
         token_hash=hash_token("test-token"),
         created_at=clock.now(),
         expires_at=clock.now() + timedelta(hours=1),
     )
     sessions_facade = build_sessions(clock, sessions=[session], seats=[seat])
     with pytest.raises(SessionAccessException):
-        asyncio.run(sessions_facade.open_publisher(token="test-token", seat_id=7))
+        asyncio.run(sessions_facade.open_publisher(token="test-token", seat_id="7"))
     assert (
         asyncio.run(
-            sessions_facade.open_publisher(token="test-token", seat_id=42)
+            sessions_facade.open_publisher(token="test-token", seat_id="A1")
         ).seat_id
-        == 42
+        == "A1"
     )
 
 
@@ -68,20 +68,20 @@ def test_old_connection_cannot_release_new_publisher(clock: MutableClock) -> Non
 
     async def run() -> None:
         first = await sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         with pytest.raises(SessionAccessException, match="seat_busy"):
             await sessions_facade.open_publisher(
-                token="demo-room-101-seat-1", seat_id=1
+                token="demo-room-101-seat-1", seat_id="1"
             )
         await sessions_facade.close_publisher(first.connection_id)
         second = await sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await sessions_facade.close_publisher(first.connection_id)
         with pytest.raises(SessionAccessException, match="seat_busy"):
             await sessions_facade.open_publisher(
-                token="demo-room-101-seat-1", seat_id=1
+                token="demo-room-101-seat-1", seat_id="1"
             )
         await sessions_facade.close_publisher(second.connection_id)
 
@@ -91,7 +91,7 @@ def test_old_connection_cannot_release_new_publisher(clock: MutableClock) -> Non
 def test_memory_rejects_multiple_open_sessions(clock: MutableClock) -> None:
     session = StreamSessionRecord(
         id=uuid4(),
-        seat_id=1,
+        seat_id="1",
         token_hash=hash_token("first"),
         created_at=clock.now(),
         expires_at=clock.now() + timedelta(hours=1),
@@ -106,7 +106,7 @@ def test_memory_rejects_multiple_open_sessions(clock: MutableClock) -> None:
 def test_history_retained_but_ended_session_denied(clock: MutableClock) -> None:
     old = StreamSessionRecord(
         id=uuid4(),
-        seat_id=1,
+        seat_id="1",
         token_hash=hash_token("old"),
         created_at=clock.now() - timedelta(hours=1),
         expires_at=clock.now() + timedelta(hours=1),
@@ -121,9 +121,9 @@ def test_history_retained_but_ended_session_denied(clock: MutableClock) -> None:
     )
     sessions_facade = build_sessions(clock, sessions=[old, current])
     with pytest.raises(SessionAccessException):
-        asyncio.run(sessions_facade.open_publisher(token="old", seat_id=1))
+        asyncio.run(sessions_facade.open_publisher(token="old", seat_id="1"))
     assert (
-        asyncio.run(sessions_facade.open_publisher(token="new", seat_id=1)).session_id
+        asyncio.run(sessions_facade.open_publisher(token="new", seat_id="1")).session_id
         == current.id
     )
 
@@ -137,7 +137,7 @@ def test_publisher_capacity_is_released_with_ownership(clock: MutableClock) -> N
             seat_id=seat,
             expires_at=clock.now() + timedelta(hours=1),
         )
-        for seat in (1, 2)
+        for seat in ("1", "2")
     )
 
     async def run() -> None:
@@ -156,7 +156,7 @@ def test_active_publisher_expiry_and_release(clock: MutableClock) -> None:
     async def run() -> None:
         sessions_facade = build_sessions(clock)
         publisher = await sessions_facade.open_publisher(
-            token="demo-room-101-seat-1", seat_id=1
+            token="demo-room-101-seat-1", seat_id="1"
         )
         await sessions_facade.validate_publisher(publisher.connection_id)
         clock.current_time = publisher.expires_at
