@@ -12,6 +12,7 @@ class LecturerSeatStatus(BaseModel):
 
     seat_id: int
     drowsy: bool
+    present: bool | None = None
 
 
 class LecturerSeatSnapshot(BaseModel):
@@ -33,18 +34,23 @@ async def get_lecturer_seats(request: Request) -> LecturerSeatSnapshot:
         return LecturerSeatSnapshot(drowsy_seats=(), seats=())
 
     updates: tuple[SeatStatusUpdate, ...] = publisher.get_snapshot()
-    lecturer_update = next(
-        (update for update in updates if update.drowsy_seats is not None),
-        None,
-    )
+    lecturer_seats: tuple[int, ...] = ()
+    for update in updates:
+        if update.drowsy_seats is not None:
+            lecturer_seats = update.drowsy_seats
+            break
     student_updates = tuple(
         update.student for update in updates if update.student is not None
     )
     seats = tuple(
-        LecturerSeatStatus(seat_id=student.seat_id, drowsy=student.drowsy)
+        LecturerSeatStatus(
+            seat_id=student.seat_id,
+            drowsy=student.drowsy,
+            present=student.present,
+        )
         for student in student_updates
     )
     return LecturerSeatSnapshot(
-        drowsy_seats=lecturer_update.drowsy_seats if lecturer_update else (),
+        drowsy_seats=lecturer_seats,
         seats=seats,
     )

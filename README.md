@@ -24,7 +24,7 @@ cd api
 cp .env.example .env  # Skip if .env already exists
 uv sync --locked
 docker compose up -d
-uv run uvicorn main:app --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 In another terminal, from the repository root:

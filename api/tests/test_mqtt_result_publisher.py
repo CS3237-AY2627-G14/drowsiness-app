@@ -1,6 +1,15 @@
 import asyncio
+from types import SimpleNamespace
 
-from modules.processing.publishing import QueueSeatStatusPublisher, StudentSeatStatus
+from starlette.requests import Request
+
+from modules.processing.publishing import (
+    QueueSeatStatusPublisher,
+    SeatStatusUpdate,
+    StudentSeatStatus,
+    build_mqtt_publications,
+)
+from modules.processing.router import LecturerSeatStatus, get_lecturer_seats
 
 
 def test_publication_indicator_is_seat_specific() -> None:
@@ -12,8 +21,6 @@ def test_publication_indicator_is_seat_specific() -> None:
 
 
 def test_snapshot_retains_latest_status_and_lecturer_list() -> None:
-    from modules.processing.publishing import SeatStatusUpdate
-
     publisher = QueueSeatStatusPublisher(asyncio.Queue())
     publisher.publish(
         SeatStatusUpdate(
@@ -31,8 +38,6 @@ def test_snapshot_retains_latest_status_and_lecturer_list() -> None:
 
 
 def test_clearing_student_removes_seat_status_from_snapshot() -> None:
-    from modules.processing.publishing import SeatStatusUpdate
-
     publisher = QueueSeatStatusPublisher(asyncio.Queue())
     publisher.publish(
         SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
@@ -43,3 +48,34 @@ def test_clearing_student_removes_seat_status_from_snapshot() -> None:
 
     snapshot = publisher.get_snapshot()
     assert snapshot == (SeatStatusUpdate(drowsy_seats=()),)
+
+
+def test_lecturer_snapshot_includes_sensor_presence() -> None:
+    publisher = QueueSeatStatusPublisher(asyncio.Queue())
+    publisher.publish(
+        SeatStatusUpdate(
+            student=StudentSeatStatus(seat_id=1, drowsy=False, present=False)
+        )
+    )
+    request = Request(
+        {
+            "type": "http",
+            "app": SimpleNamespace(state=SimpleNamespace(status_publisher=publisher)),
+        }
+    )
+
+    snapshot = asyncio.run(get_lecturer_seats(request))
+
+    assert snapshot.seats == (
+        LecturerSeatStatus(seat_id=1, drowsy=False, present=False),
+    )
+
+
+def test_student_mqtt_result_does_not_expose_classroom_presence_field() -> None:
+    update = SeatStatusUpdate(
+        student=StudentSeatStatus(seat_id=1, drowsy=False, present=False)
+    )
+
+    publication = build_mqtt_publications(update)[0]
+
+    assert publication.payload == '{"drowsy":false}'

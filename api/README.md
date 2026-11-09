@@ -26,12 +26,15 @@ uv sync --locked
 docker compose up -d
 ```
 
-Start the API in that terminal (use `DROWSINESS_INFERENCE_DEVICE=cpu` in `.env`
-for a CPU-only setup):
+Start the API in that terminal with auto-reload enabled for development (use
+`DROWSINESS_INFERENCE_DEVICE=cpu` in `.env` for a CPU-only setup):
 
 ```text
-uv run uvicorn main:app --host 0.0.0.0 --port 8000
+uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+Uvicorn restarts the API when you save a Python file. This is for development;
+omit `--reload` when running the API in production.
 
 In another terminal, starting from the repository root:
 
@@ -115,8 +118,10 @@ Student nodes publish versioned telemetry every 200 ms to
 ```
 
 Distances are centimetres and millimetres; invalid distances are `null`.
-ADC readings range from 0 to 4095. Boot identity, sequence and uptime reject old
-packets. Reflash all student nodes with this API; older payloads are unsupported.
+The API derives seat presence from `lower_mm` using
+`DROWSINESS_SENSOR_PRESENCE_MM` (default 300 mm); null or out-of-range readings
+are treated as unoccupied. ADC readings range from 0 to 4095. Boot identity,
+sequence and uptime reject old packets.
 
 The API owns the corrected sensor truth table and learned seat 1 classifier.
 Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence

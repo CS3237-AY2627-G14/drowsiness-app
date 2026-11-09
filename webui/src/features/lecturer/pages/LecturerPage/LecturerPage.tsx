@@ -20,10 +20,7 @@ export const LecturerPage = () => {
   const selectedRoomId = roomId ?? rooms[0]?.id ?? null
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? null
   const statusBySeatId = new Map(
-    (seatsStatus.data?.seats ?? []).map((status) => [
-      status.seat_id,
-      status.drowsy,
-    ]),
+    (seatsStatus.data?.seats ?? []).map((status) => [status.seat_id, status]),
   )
   const drowsySeatIds = new Set(seatsStatus.data?.drowsy_seats ?? [])
 
@@ -92,10 +89,19 @@ export const LecturerPage = () => {
                   {String.fromCharCode(65 + rowIndex)}
                 </span>
                 {row.map((seat, seatIndex) => {
+                  const status = statusBySeatId.get(seat.id)
+                  const unoccupied = status?.present === false
                   const drowsy =
-                    statusBySeatId.get(seat.id) === true ||
-                    drowsySeatIds.has(seat.id)
-                  const hasStatus = statusBySeatId.has(seat.id)
+                    !unoccupied &&
+                    (status?.drowsy === true || drowsySeatIds.has(seat.id))
+                  const hasStatus = status !== undefined && !unoccupied
+                  const statusLabel = drowsy
+                    ? `Seat ${seat.seat_number}: drowsy`
+                    : hasStatus
+                      ? `Seat ${seat.seat_number}: awake`
+                      : unoccupied
+                        ? `Seat ${seat.seat_number}: unoccupied`
+                        : `Seat ${seat.seat_number}: no status`
                   const seatClass = drowsy
                     ? 'border-red-500 bg-red-500 text-white shadow-[0_0_0_4px_rgba(239,68,68,0.14)]'
                     : hasStatus
@@ -106,21 +112,9 @@ export const LecturerPage = () => {
                   return (
                     <div key={seat.id} style={{ gridColumn: column }}>
                       <div
-                        title={
-                          drowsy
-                            ? `Seat ${seat.seat_number}: drowsy`
-                            : hasStatus
-                              ? `Seat ${seat.seat_number}: awake`
-                              : `Seat ${seat.seat_number}: no status`
-                        }
+                        title={statusLabel}
                         className={`mx-auto flex aspect-square max-h-16 max-w-16 items-center justify-center rounded-xl border-2 text-sm font-extrabold transition-colors ${seatClass}`}
-                        aria-label={
-                          drowsy
-                            ? `Seat ${seat.seat_number}, drowsy`
-                            : hasStatus
-                              ? `Seat ${seat.seat_number}, awake`
-                              : `Seat ${seat.seat_number}, no status`
-                        }
+                        aria-label={statusLabel.replace(': ', ', ')}
                       >
                         {seat.seat_number}
                       </div>
@@ -139,7 +133,7 @@ export const LecturerPage = () => {
               <span className="h-3 w-3 rounded-full bg-emerald-500" /> Awake
             </span>
             <span className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-full border border-[var(--line)] bg-white" /> No status
+              <span className="h-3 w-3 rounded-full border border-[var(--line)] bg-white" /> Unoccupied / no status
             </span>
           </div>
         </section>

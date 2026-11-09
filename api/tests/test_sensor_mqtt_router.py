@@ -197,7 +197,7 @@ def test_unoccupied_firmware_sensor_sample_is_not_counted() -> None:
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
         assert result.sensor_drowsy is None
-        assert result.present is None
+        assert result.present is False
         assert result.minute.valid_samples == 0
 
     asyncio.run(run())
@@ -249,6 +249,7 @@ def test_sensor_message_without_timestamp_uses_presence_for_classification() -> 
         assert record is not None and record.detection_state.detection is not None
         result = record.detection_state.detection
         assert result.sensor_drowsy is None
+        assert result.present is False
         assert result.minute.valid_samples == 0
         assert result.minute.drowsy_samples == 0
 
@@ -390,20 +391,28 @@ def _runtime(
 _sequences = itertools.count(1)
 
 
-def _sensor_message(fsr: int, tof_mm: int, *, present: int = 1) -> bytes:
+def _sensor_message(
+    fsr: int,
+    tof_mm: int,
+    *,
+    present: int = 1,
+    lower_mm: int | None = None,
+) -> bytes:
     sequence = next(_sequences)
-    return json.dumps(
-        {
-            "upper_cm": 7,
-            "lower_mm": 150 if present else None,
-            "schema_version": 1,
-            "boot_id": "test",
-            "sequence": sequence,
-            "uptime_ms": sequence * 200,
-            "back_adc": fsr,
-            "desk_adc": 1500 if fsr else 0,
-        }
-    ).encode()
+    lower_reading = 150 if present else None
+    if lower_mm is not None:
+        lower_reading = lower_mm
+    message: dict[str, int | bool | None | str] = {
+        "upper_cm": 7,
+        "lower_mm": lower_reading,
+        "schema_version": 1,
+        "boot_id": "test",
+        "sequence": sequence,
+        "uptime_ms": sequence * 200,
+        "back_adc": fsr,
+        "desk_adc": 1500 if fsr else 0,
+    }
+    return json.dumps(message).encode()
 
 
 def _camera_frame(
@@ -448,7 +457,9 @@ def test_sensor_reading_publishes_student_status_without_lecturer_notice() -> No
         )
 
         assert publisher.updates == [
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
+            SeatStatusUpdate(
+                student=StudentSeatStatus(seat_id=1, drowsy=False, present=True)
+            )
         ]
 
     asyncio.run(run())
@@ -489,7 +500,13 @@ def test_sensor_absence_reclassifies_latest_camera_sample(
         )
         assert record.detection_state.detection.present is (True if present else None)
         assert publisher.updates == [
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=1, drowsy=False))
+            SeatStatusUpdate(
+                student=StudentSeatStatus(
+                    seat_id=1,
+                    drowsy=False,
+                    present=True if present else None,
+                )
+            )
         ]
 
     asyncio.run(run())
@@ -520,7 +537,7 @@ def test_alert_publishes_student_status_and_drowsy_seat_ids() -> None:
         ]
         assert lecturer_updates == [(1,)]
         assert publisher.updates[-1].student == StudentSeatStatus(
-            seat_id=1, drowsy=True
+            seat_id=1, drowsy=True, present=True
         )
 
         _raise_alert(processing_service, second)
@@ -537,7 +554,7 @@ def test_alert_publishes_student_status_and_drowsy_seat_ids() -> None:
 
         await processing_service.close_connection(first)
         assert publisher.updates[-1] == SeatStatusUpdate(
-            student=StudentSeatStatus(seat_id=1, drowsy=False),
+            student=StudentSeatStatus(seat_id=1, drowsy=False, present=True),
             drowsy_seats=(2,),
         )
 
@@ -707,9 +724,34 @@ def test_sensor_publish_intervals_are_per_seat_and_unaffected_by_camera_updates(
             "drowsy/stud/2/data", _sensor_message(100, 420)
         )
         assert publisher.updates == [
-            SeatStatusUpdate(student=StudentSeatStatus(seat_id=seat_id, drowsy=False))
+            SeatStatusUpdate(
+                student=StudentSeatStatus(seat_id=seat_id, drowsy=False, present=True)
+            )
             for seat_id in (1, 2, 1, 1, 2)
         ]
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("seat_id", [1, 2])
+def test_unoccupied_sensor_reading_marks_classroom_seat_unoccupied(
+    seat_id: int,
+) -> None:
+    async def run() -> None:
+        publisher = RecordingStatusPublisher()
+        processing_service, mqtt_router, _registry = _runtime(2, publisher)
+        connection_id = uuid4()
+        await processing_service.open_connection(connection_id)
+        await processing_service.associate_seat(connection_id, seat_id)
+
+        await mqtt_router._handle_message(
+            f"drowsy/stud/{seat_id}/data",
+            _sensor_message(100, 420, present=0),
+        )
+
+        assert publisher.updates[-1] == SeatStatusUpdate(
+            student=StudentSeatStatus(seat_id=seat_id, drowsy=False, present=False)
+        )
 
     asyncio.run(run())
 
@@ -721,12 +763,12 @@ def test_unknown_sensor_evidence_holds_then_expires_alert() -> None:
         connection_id = uuid4()
         await service.open_connection(connection_id)
         await service.associate_seat(connection_id, 1)
-        await router._handle_message("drowsy/stud/1/data", _sensor_message(100, 420))
+        await router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
         _raise_alert(service, connection_id)
         timer = MutableTimer(9.25)
         service._timer = timer
         publisher.updates.clear()
-        await router._handle_message("drowsy/stud/1/data", _sensor_message(0, 420))
+        await router._handle_message("drowsy/stud/1/data", _sensor_message(100, 420))
         status = await service.get_status(connection_id)
         assert status.detection is not None and status.detection.alert
         assert status.detection_debug is not None
@@ -735,7 +777,7 @@ def test_unknown_sensor_evidence_holds_then_expires_alert() -> None:
         assert status.detection_debug.current_drowsy is None
         timer.current_time = 14.25
         expired = await service.get_status(connection_id)
-        assert expired.detection is None
+        assert expired.detection is not None and not expired.detection.alert
         assert expired.detection_debug is not None
         assert expired.detection_debug.confirmed_state == "unavailable"
         assert expired.detection_debug.unknown_seconds >= 5
@@ -743,6 +785,36 @@ def test_unknown_sensor_evidence_holds_then_expires_alert() -> None:
         count = len(publisher.updates)
         await service.get_status(connection_id)
         assert len(publisher.updates) == count
+
+    asyncio.run(run())
+
+
+def test_sensorless_camera_snapshot_survives_unknown_timeout() -> None:
+    async def run() -> None:
+        timer = MutableTimer()
+        service, _router, _registry = _runtime(2, timer=timer)
+        connection_id = uuid4()
+        await service.open_connection(connection_id)
+        await service.associate_seat(connection_id, 2)
+
+        for frame_id in range(31):
+            timer.current_time = frame_id / 5
+            service._apply_frame_measurements(
+                _camera_frame(
+                    connection_id,
+                    frame_id + 1,
+                    timer.current_time * 1000,
+                )
+            )
+            status = await service.get_status(connection_id)
+
+        assert status.detection is not None
+        assert status.detection.face_detected
+        assert status.detection.minute.valid_samples == 0
+        assert status.detection_debug is not None
+        assert status.detection_debug.confirmed_state == "unavailable"
+        assert status.detection_debug.camera_age_seconds == 0
+        assert status.detection_debug.reason == "sensor_stale_or_missing"
 
     asyncio.run(run())
 

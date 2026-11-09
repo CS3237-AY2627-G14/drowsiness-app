@@ -15,6 +15,7 @@ class StudentSeatStatus(BaseModel):
 
     seat_id: int = Field(exclude=True)
     drowsy: bool
+    present: bool | None = None
 
 
 class LecturerResult(BaseModel):
@@ -84,7 +85,7 @@ def build_mqtt_publications(
     student = update.student
     if student is not None:
         topic = build_student_result_topic(student.seat_id)
-        payload = student.model_dump_json()
+        payload = student.model_dump_json(exclude={"present"})
         publication = MqttPublication(topic=topic, payload=payload, retain=False)
         messages.append(publication)
     if update.drowsy_seats is not None:

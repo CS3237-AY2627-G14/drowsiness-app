@@ -3,6 +3,7 @@ import { axiosClient } from '#/lib/axiosClient.ts'
 export type LecturerSeatStatus = {
   seat_id: number
   drowsy: boolean
+  present: boolean | null
 }
 
 export type LecturerSeatSnapshot = {

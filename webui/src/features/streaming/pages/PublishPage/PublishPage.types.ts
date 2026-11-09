@@ -1,6 +1,7 @@
 import type { RefObject } from 'react'
 import type { Classroom, Seat } from '#/types/classrooms'
 import type {
+  DetectionDebug,
   DetectionResult,
   StreamDiagnosticsSnapshot,
 } from '../../types/protocol.types'
@@ -32,6 +33,7 @@ export type PublishControlsProps = {
 
 export type DetectionStatusProps = {
   detection: DetectionResult | null
+  detectionDebug: DetectionDebug | null
   mqttAlertSentRecently: boolean
 }
 
