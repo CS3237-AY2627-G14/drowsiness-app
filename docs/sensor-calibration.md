@@ -163,13 +163,14 @@ packets cannot overwrite it. Missing or stale raw telemetry produces unknown
 evidence rather than silently falling back. Current sensor evidence is combined when inference completes; new sensor
 readings can revise the latest combined sample without adding observations.
 
-A sample counts as drowsy only when occupied and the sensor gate passes, plus
-either CNN fatigue probability ≥0.65, both EARs <0.21, or no usable face in a
-successfully processed frame. Sensor-awake suppresses the sample; unknown
-evidence and unoccupied seats do not count. Camera disconnects do not create
-no-face samples. An alert requires ≥10 valid seconds and ≥50% drowsy in the
-rolling minute. Per-seat alert status publishes to `drowsy/stud/1/result`, QoS 1, and the
-retained lecturer list on `drowsy/lect/result` tracks all active seats.
+A sample counts as drowsy only when occupied, the sensor gate passes, and the
+camera indicates drowsiness: CNN fatigue probability ≥0.65 or both EARs <0.21.
+Missing camera measurements do not confirm a drowsy sensor reading. Sensor-awake
+suppresses the sample; unknown evidence and unoccupied seats do not count.
+Camera disconnects do not create no-face samples. An alert requires ≥10 valid
+seconds and ≥50% drowsy in the rolling minute. Per-seat alert status publishes
+to `drowsy/stud/1/result`, QoS 1, and the retained lecturer list on
+`drowsy/lect/result` tracks all active seats.
 
 For a correction, record the failing posture, adjust labels where necessary,
 select old plus new development recordings, and train again. Dataset snapshots

@@ -122,11 +122,12 @@ packets. Reflash all student nodes with this API; older payloads are unsupported
 The API owns the corrected sensor truth table and learned seat 1 classifier.
 Missing ultrasonic echo gives unknown baseline evidence. Fresh sensor evidence
 (up to five seconds old) combines with camera measurements. Sensor-awake counts
-as awake; sensor-drowsy counts when the camera agrees or has no face measurements.
-An awake camera overrides a drowsy sensor. Missing evidence and unoccupied seats
-do not count. New sensor readings can revise the latest combined sample without
-adding observations. The rolling minute uses the latest picture per second and
-requires ten valid samples with at least half drowsy.
+as awake. A sample counts as drowsy only when both the sensor and camera indicate
+drowsiness; missing camera measurements do not confirm a drowsy sensor reading.
+Missing evidence and unoccupied seats do not count. New sensor readings can revise
+the latest combined sample without adding observations. The rolling minute uses
+the latest picture per second and requires ten valid samples with at least half
+drowsy.
 
 Results publish at QoS 1 to `drowsy/stud/<seat_id>/result` as `{"drowsy":true}`.
 Student nodes alert for five seconds on false-to-true transitions. Sensor-driven

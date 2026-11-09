@@ -4,7 +4,10 @@ import pytest
 
 from core.config import Settings
 from modules.processing.schemas import DetectionState, FrameMeasurements
-from modules.processing.utils.drowsiness_rules import evaluate_measurements
+from modules.processing.utils.drowsiness_rules import (
+    evaluate_measurements,
+    reclassify_latest_sample,
+)
 
 
 def observe(
@@ -89,7 +92,7 @@ def test_latest_picture_per_second_counts_and_history_stays_bounded() -> None:
     assert record.detection.frame_id == 602
 
 
-def test_no_face_does_not_count_as_awake_and_alert_expires_with_history() -> None:
+def test_no_face_is_unknown_and_alert_expires_with_history() -> None:
     record = DetectionState()
     for index in range(10):
         record = observe(record, float(index * 1000), probability=0.9)
@@ -98,7 +101,7 @@ def test_no_face_does_not_count_as_awake_and_alert_expires_with_history() -> Non
     )
     assert record.detection is not None
     assert record.detection.alert and not record.detection.face_detected
-    assert record.detection.minute.valid_samples == 11
+    assert record.detection.minute.valid_samples == 10
     record = observe(
         record,
         70000.0,
@@ -108,8 +111,37 @@ def test_no_face_does_not_count_as_awake_and_alert_expires_with_history() -> Non
         sensor_drowsy=None,
     )
     assert record.detection is not None and not record.detection.alert
-    assert record.detection.minute.valid_samples == 1
-    assert record.detection.minute.unavailable_samples == 59
+    assert record.detection.minute.valid_samples == 0
+    assert record.detection.minute.unavailable_samples == 60
+
+
+def test_sensor_reclassification_updates_alert_from_rolling_window() -> None:
+    record = DetectionState()
+    for index in range(10):
+        record = observe(
+            record,
+            float(index * 1000),
+            probability=0.9 if index < 4 or index == 9 else 0.1,
+        )
+    assert record.detection is not None and record.detection.alert
+
+    latest = FrameMeasurements(
+        connection_id=uuid4(),
+        frame_id=record.detection.frame_id,
+        captured_at_ms=record.detection.captured_at_ms,
+        left_ear=0.3,
+        right_ear=0.3,
+        fatigue_probability=0.1,
+        sensor_drowsy=True,
+        present=True,
+    )
+    record = reclassify_latest_sample(record, latest, Settings())
+
+    assert len(record.samples) == 10
+    assert record.detection is not None
+    assert record.detection.minute.valid_samples == 10
+    assert record.detection.minute.drowsy_samples == 4
+    assert not record.detection.alert
 
 
 def test_eye_and_cnn_signals_combine_without_sharing_camera_history() -> None:
@@ -138,8 +170,8 @@ def test_eye_and_cnn_signals_combine_without_sharing_camera_history() -> None:
         (0.21, 0.21, None, 1, 0),
         (None, None, 0.649, 1, 0),
         (None, None, 0.65, 1, 1),
-        (0.10, None, None, 1, 1),
-        (None, 0.10, None, 1, 1),
+        (0.10, None, None, 1, 0),
+        (None, 0.10, None, 1, 0),
         (0.10, None, 0.65, 1, 1),
     ],
 )
@@ -185,7 +217,7 @@ def test_unoccupied_sensor_sample_is_unknown_and_exposes_sensor_result() -> None
     [
         (True, "drowsy", 1, 1),
         (True, "awake", 1, 0),
-        (True, "no_face", 1, 1),
+        (True, "no_face", 0, 0),
         (False, "drowsy", 1, 0),
         (False, "no_face", 1, 0),
         (None, "drowsy", 0, 0),

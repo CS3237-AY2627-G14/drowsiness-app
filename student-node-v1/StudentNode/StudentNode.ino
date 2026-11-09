@@ -75,6 +75,7 @@ int upperCm = -1;    // ultrasonic, -1 = no echo
 int lowerMm = -1;    // ToF, -1 = out of range
 int backValue = 0;
 int deskValue = 0;
+unsigned long ultrasonicPulseUs = 0;
 
 unsigned long lastSensor = 0;
 unsigned long lastPublish = 0;
@@ -134,9 +135,9 @@ int readUltrasonicCm() {
   digitalWrite(US_TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(US_TRIG_PIN, LOW);
-  unsigned long us = pulseIn(US_ECHO_PIN, HIGH, 30000);  // give up after 30 ms
-  if (us == 0) return -1;
-  return (int)(us * 0.0343 / 2);
+  ultrasonicPulseUs = pulseIn(US_ECHO_PIN, HIGH, 30000);  // give up after 30 ms
+  if (ultrasonicPulseUs == 0) return -1;
+  return (int)(ultrasonicPulseUs * 0.0343 / 2);
 }
 
 int readTofMm() {
@@ -155,8 +156,8 @@ void printDebug() {
     Serial.printf("SLEEPING (no MQTT) | lower=%4d mm\n", lowerMm);
     return;
   }
-  Serial.printf("upper=%4d cm | lower=%4d mm | back=%4d | desk=%4d\n",
-                upperCm, lowerMm, backValue, deskValue);
+  Serial.printf("upper=%4d cm (echo=%5lu us) | lower=%4d mm | back=%4d | desk=%4d\n",
+                upperCm, ultrasonicPulseUs, lowerMm, backValue, deskValue);
 }
 
 void publishData() {
