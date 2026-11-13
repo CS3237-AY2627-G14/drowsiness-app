@@ -22,7 +22,10 @@ Publish. Demo tokens look like `demo-room-101-seat-1`.
 Lecturers can open http://localhost:3000/lecturer to view the classroom seat
 layout. Seats use the configured student-node seat numbers and refresh every two
 seconds; red seats are drowsy, green seats are awake, and unoccupied or
-unreported seats have no status.
+unreported seats have no status. The demo classroom is configured for 25 seats,
+shown as a 5×5 layout. Use **Show demo statuses** to locally preview a mix of
+drowsy, awake, and unoccupied seats for screenshots; it does not change API or
+live status data. Click **Show live statuses** to return to live data.
 
 Camera settings are listed in [.env.example](.env.example). Overrides can go in
 `.env.local`; restart Vite after changing them. Camera access requires localhost

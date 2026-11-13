@@ -36,7 +36,7 @@ export const CalibrationPage = () => {
         <p className="text-sm font-semibold uppercase tracking-widest">
           Student 1 · Seat 1
         </p>
-        <h1 className="text-3xl font-bold">Sensor calibration</h1>
+        <h1 className="text-3xl font-bold">Seat statistics</h1>
         <p>
           Record staged postures, correct labels, and compare model versions
           before activation. Recordings stay available for future recalibration.

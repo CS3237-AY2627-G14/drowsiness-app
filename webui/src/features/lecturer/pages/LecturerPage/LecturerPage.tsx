@@ -6,10 +6,41 @@ import { useClassrooms } from '#/features/streaming/hooks/useClassrooms.ts'
 import type { Seat } from '#/types/classrooms'
 
 const SEATS_PER_ROW = 5
+const DEMO_SEAT_STATUSES: Record<
+  number,
+  { drowsy: boolean; present: boolean }
+> = {
+  1: { drowsy: true, present: true },
+  2: { drowsy: false, present: true },
+  3: { drowsy: false, present: false },
+  4: { drowsy: true, present: true },
+  5: { drowsy: false, present: true },
+  6: { drowsy: false, present: true },
+  7: { drowsy: false, present: false },
+  8: { drowsy: true, present: true },
+  9: { drowsy: false, present: true },
+  10: { drowsy: true, present: true },
+  11: { drowsy: false, present: true },
+  12: { drowsy: true, present: true },
+  13: { drowsy: false, present: true },
+  14: { drowsy: false, present: false },
+  15: { drowsy: false, present: true },
+  16: { drowsy: true, present: true },
+  17: { drowsy: false, present: true },
+  18: { drowsy: false, present: false },
+  19: { drowsy: true, present: true },
+  20: { drowsy: false, present: true },
+  21: { drowsy: false, present: false },
+  22: { drowsy: false, present: true },
+  23: { drowsy: true, present: true },
+  24: { drowsy: false, present: true },
+  25: { drowsy: false, present: true },
+}
 
 export const LecturerPage = () => {
   const classrooms = useClassrooms()
   const [roomId, setRoomId] = useState<number | null>(null)
+  const [demoMode, setDemoMode] = useState(false)
   const seatsStatus = useQuery({
     queryKey: ['lecturer-seats'],
     queryFn: ({ signal }) => getLecturerSeats(signal),
@@ -26,6 +57,10 @@ export const LecturerPage = () => {
 
   const handleRoomChange = (event: ChangeEvent<HTMLSelectElement>) => {
     setRoomId(Number(event.currentTarget.value))
+  }
+
+  const handleDemoModeToggle = () => {
+    setDemoMode((current) => !current)
   }
 
   const sortedSeats = [...(selectedRoom?.seats ?? [])].sort(
@@ -45,25 +80,44 @@ export const LecturerPage = () => {
             Classroom seat status
           </h1>
         </div>
-        <div className="min-w-48">
-          <label htmlFor="lecturer-room" className="mb-1.5 block text-sm font-medium">
-            Classroom
-          </label>
-          <select
-            id="lecturer-room"
-            className="form-control"
-            value={selectedRoomId ?? ''}
-            disabled={rooms.length === 0}
-            onChange={handleRoomChange}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-48">
+            <label htmlFor="lecturer-room" className="mb-1.5 block text-sm font-medium">
+              Classroom
+            </label>
+            <select
+              id="lecturer-room"
+              className="form-control"
+              value={selectedRoomId ?? ''}
+              disabled={rooms.length === 0}
+              onChange={handleRoomChange}
+            >
+              {rooms.map((room) => (
+                <option key={room.id} value={room.id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            type="button"
+            className="rounded-lg border border-[var(--line)] bg-white px-4 py-2 text-sm font-semibold"
+            aria-pressed={demoMode}
+            onClick={handleDemoModeToggle}
           >
-            {rooms.map((room) => (
-              <option key={room.id} value={room.id}>
-                {room.name}
-              </option>
-            ))}
-          </select>
+            {demoMode ? 'Show live statuses' : 'Show demo statuses'}
+          </button>
         </div>
       </header>
+
+      {demoMode && (
+        <p
+          role="status"
+          className="mb-4 text-sm font-medium text-[var(--sea-ink-soft)]"
+        >
+          Demo statuses are shown locally; live data is unchanged.
+        </p>
+      )}
 
       {classrooms.isError ? (
         <div role="alert" className="island-shell rounded-2xl p-5 text-sm">
@@ -89,11 +143,14 @@ export const LecturerPage = () => {
                   {String.fromCharCode(65 + rowIndex)}
                 </span>
                 {row.map((seat, seatIndex) => {
-                  const status = statusBySeatId.get(seat.id)
+                  const status = demoMode
+                    ? DEMO_SEAT_STATUSES[seat.seat_number]
+                    : statusBySeatId.get(seat.id)
                   const unoccupied = status?.present === false
                   const drowsy =
                     !unoccupied &&
-                    (status?.drowsy === true || drowsySeatIds.has(seat.id))
+                    (status?.drowsy === true ||
+                      (!demoMode && drowsySeatIds.has(seat.id)))
                   const hasStatus = status !== undefined && !unoccupied
                   const statusLabel = drowsy
                     ? `Seat ${seat.seat_number}: drowsy`
