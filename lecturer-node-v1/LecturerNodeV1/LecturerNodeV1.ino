@@ -10,16 +10,23 @@
 
 #include "ESP32MQTTClient.h"
 #include "esp_idf_version.h"
-#include "config.h"
+#include "config.example.h"
 
 const char *ssid = WIFI_SSID;
 const char *pass = WIFI_PASSWORD;
 
-#define LEDPIN 5
-#define LEDCHANNEL 1
-#define LEDFREQ 5000
-#define LEDRESOLUTION 8
+const int RED_PIN = 25;
+const int GREEN_PIN = 27;
+const int BLUE_PIN = 26;
 #define BUZZER_PIN 15
+
+constexpr int MUTE_BUTTON_PIN = 4;
+constexpr uint32_t BUTTON_DEBOUNCE_MS = 250;
+
+portMUX_TYPE buttonMux = portMUX_INITIALIZER_UNLOCKED;
+volatile bool muteToggleRequested = false;
+bool isMuted = false;
+uint32_t lastButtonToggleAt = 0;
 
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
@@ -50,6 +57,15 @@ uint32_t lastScrollAt = 0;
 bool alarmActive = false;
 uint8_t alarmPhase = 0;
 uint32_t alarmPhaseStartedAt = 0;
+
+
+
+void IRAM_ATTR onMuteButtonPress()
+{
+    portENTER_CRITICAL_ISR(&buttonMux);
+    muteToggleRequested = true;
+    portEXIT_CRITICAL_ISR(&buttonMux);
+}
 
 bool appendId(JsonVariant value, char *destination, size_t capacity, size_t &length)
 {
@@ -176,12 +192,45 @@ void renderLcd(const DisplayData &data)
     }
 }
 
+
+void setColor(int red, int green, int blue)
+{
+    analogWrite(RED_PIN, red);
+    analogWrite(GREEN_PIN, green);
+    analogWrite(BLUE_PIN, blue);
+}
+
+void setStatusColor(const DisplayData &data)
+{
+    if (data.numberStudents > 10)
+    {
+        setColor(255, 0, 0);
+    }
+    else if (data.numberStudents > 5)
+    {
+        setColor(255, 255, 0);
+    }
+    else
+    {
+        setColor(0, 255, 0);
+    }
+}
+
+void renderMutedMessage()
+{
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Lecturer Node");
+    lcd.setCursor(0, 1);
+    lcd.print("Muted");
+}
+
 void startAlarm()
 {
     alarmActive = true;
     alarmPhase = 0;
     alarmPhaseStartedAt = millis();
-    ledcWriteChannel(LEDCHANNEL, 15);
+    setColor(83, 255, 0);
     tone(BUZZER_PIN, 392);
 }
 
@@ -197,22 +246,24 @@ void updateAlarm()
     if (alarmPhase >= 6)
     {
         alarmActive = false;
-        ledcWriteChannel(LEDCHANNEL, 0);
+        setStatusColor(displayData);
         noTone(BUZZER_PIN);
         return;
     }
 
     if (alarmPhase % 2 == 0)
     {
-        ledcWriteChannel(LEDCHANNEL, 15);
+        setColor(83, 255, 0);
         tone(BUZZER_PIN, 392);
     }
     else
     {
-        ledcWriteChannel(LEDCHANNEL, 0);
+        setColor(0, 0, 0);
         noTone(BUZZER_PIN);
     }
 }
+
+
 
 void setup()
 {
@@ -223,12 +274,18 @@ void setup()
     mqttClient.enableLastWillMessage("lwt", "I am going offline");
     mqttClient.setKeepAlive(30);
 
-    WiFi.begin(ssid, pass);
+    pinMode(RED_PIN, OUTPUT);
+    pinMode(GREEN_PIN, OUTPUT);
+    pinMode(BLUE_PIN, OUTPUT);
+    pinMode(MUTE_BUTTON_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(MUTE_BUTTON_PIN), onMuteButtonPress, FALLING);
+    lastButtonToggleAt = millis() - BUTTON_DEBOUNCE_MS;
+
     WiFi.setHostname("c3test");
+    WiFi.begin(ssid, pass);
     mqttClient.loopStart();
 
-    ledcAttachChannel(LEDPIN, LEDFREQ, LEDRESOLUTION, LEDCHANNEL);
-    ledcWriteChannel(LEDCHANNEL, 0);
+    setStatusColor(displayData);
     Wire.begin(21, 22);
     lcd.init();
     lcd.backlight();
@@ -237,6 +294,41 @@ void setup()
 
 void loop()
 {
+    bool toggleMute = false;
+    portENTER_CRITICAL(&buttonMux);
+    if (muteToggleRequested)
+    {
+        muteToggleRequested = false;
+        toggleMute = true;
+    }
+    portEXIT_CRITICAL(&buttonMux);
+
+    if (toggleMute && millis() - lastButtonToggleAt >= BUTTON_DEBOUNCE_MS)
+    {
+        lastButtonToggleAt = millis();
+        isMuted = !isMuted;
+        if (isMuted)
+        {
+            alarmActive = false;
+            noTone(BUZZER_PIN);
+            portENTER_CRITICAL(&dataMux);
+            alarmPending = false;
+            portEXIT_CRITICAL(&dataMux);
+            setColor(0, 0, 255);
+            renderMutedMessage();
+        }
+        else
+        {
+            portENTER_CRITICAL(&dataMux);
+            alarmPending = false;
+            portEXIT_CRITICAL(&dataMux);
+            scrollOffset = 0;
+            lastScrollAt = millis();
+            renderLcd(displayData);
+            setStatusColor(displayData);
+        }
+    }
+
     bool hasNewData = false;
     bool shouldAlarm = false;
 
@@ -246,12 +338,12 @@ void loop()
         displayData = pendingData;
         updatePending = false;
         hasNewData = true;
-        shouldAlarm = alarmPending;
+        shouldAlarm = alarmPending && !isMuted;
         alarmPending = false;
     }
     portEXIT_CRITICAL(&dataMux);
 
-    if (hasNewData)
+    if (hasNewData && !isMuted)
     {
         scrollOffset = 0;
         lastScrollAt = millis();
@@ -260,17 +352,24 @@ void loop()
         {
             startAlarm();
         }
+        else if (!alarmActive)
+        {
+            setStatusColor(displayData);
+        }
     }
 
     const uint32_t now = millis();
-    if (strlen(displayData.ids) > 16 && now - lastScrollAt >= LCD_SCROLL_INTERVAL_MS)
+    if (!isMuted && strlen(displayData.ids) > 16 && now - lastScrollAt >= LCD_SCROLL_INTERVAL_MS)
     {
         lastScrollAt = now;
         ++scrollOffset;
         renderLcd(displayData);
     }
 
-    updateAlarm();
+    if (!isMuted)
+    {
+        updateAlarm();
+    }
     delay(1);
 }
 
@@ -333,3 +432,7 @@ void handleMQTT(void *handler_args, esp_event_base_t base, int32_t event_id, voi
     mqttClient.onEventCallback(event);
 }
 #endif
+
+
+
+
